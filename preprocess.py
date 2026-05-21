@@ -128,21 +128,17 @@ print("\n===== STEP 2.5：鏡像處理 =====")
 print(f"左投筆數：{(df_raw['p_throws']=='L').sum():,}")
 print(f"右投筆數：{(df_raw['p_throws']=='R').sum():,}")
 
-# ── 先存沒有鏡像的版本 ──────────────────────────────────
 df_no_mirror = df_raw.copy()
 df_no_mirror.to_csv('Pitch_physical_only.csv', index=False)
 print(f"\n已儲存：Pitch_physical_only.csv（無鏡像，{len(df_no_mirror):,} 筆）")
 
-# ── 開始做鏡像 ──────────────────────────────────────────
 df_mirror = df_raw.copy()
 mask_L    = df_mirror['p_throws'] == 'L'
 
-# ① 線性水平特徵：左投取負號
 for col in ['pfx_x', 'ax', 'vx0']:
     df_mirror.loc[mask_L, col] = -df_mirror.loc[mask_L, col]
     print(f"  {col}：左投取負號")
 
-# ② spin_axis：環狀鏡像
 def circular_mean(angles_deg):
     rad = np.deg2rad(angles_deg.dropna())
     return np.rad2deg(np.arctan2(np.sin(rad).mean(), np.cos(rad).mean())) % 360
@@ -155,9 +151,6 @@ df_mirror.loc[mask_L, 'spin_axis'] = (
 ) % 360
 print(f"  spin_axis：右投均值 {m_R:.1f}°，左投均值 {m_L:.1f}°，鏡像軸 {MIRROR_AXIS:.1f}°")
 
-
-
-# ── 驗證 ────────────────────────────────────────────────
 print("\n  驗證（均值差越小代表雙峰消除越好）：")
 print(f"  {'特徵':<10} {'鏡像前差距':>12} {'鏡像後差距':>12}")
 print(f"  {'-'*36}")
@@ -172,17 +165,14 @@ m_R_after = circular_mean(df_mirror[df_mirror['p_throws']=='R']['spin_axis'])
 m_L_after = circular_mean(df_mirror[df_mirror['p_throws']=='L']['spin_axis'])
 print(f"  {'spin_axis':<10} 鏡像前差 {abs(m_R-m_L):.1f}°  鏡像後差 {abs(m_R_after-m_L_after):.1f}°")
 
-# ── 存鏡像版本 ──────────────────────────────────────────
 df_mirror.to_csv('Pitch_physical_only_mirror.csv', index=False)
 print(f"\n已儲存：Pitch_physical_only_mirror.csv（有鏡像，{len(df_mirror):,} 筆）")
 
-# 後續 STEP 3 以後用鏡像版本繼續跑
 df_raw = df_mirror
 
 #%%
 # ============================================================
 # STEP 3：取 10 萬筆（依球種分層抽樣）
-# 兩個版本都各存一份
 # ============================================================
 N_SAMPLE = 100_000
 
@@ -197,13 +187,11 @@ def stratified_sample(data, n):
         .reset_index(drop=True)
     )
 
-# ── 無鏡像版本 ──────────────────────────────────────────
 df_sample_no_mirror = stratified_sample(df_no_mirror, N_SAMPLE)
 df_sample_no_mirror.to_csv('testdata_only_phy.csv', index=False)
 print(f"已儲存：testdata_only_phy.csv（無鏡像，{len(df_sample_no_mirror):,} 筆）")
 print(df_sample_no_mirror['pitch_name'].value_counts().to_string())
 
-# ── 有鏡像版本 ──────────────────────────────────────────
 df_sample_mirror = stratified_sample(df_mirror, N_SAMPLE)
 df_sample_mirror.to_csv('testdata_only_phy_mirror.csv', index=False)
 print(f"\n已儲存：testdata_only_phy_mirror.csv（有鏡像，{len(df_sample_mirror):,} 筆）")
@@ -232,7 +220,6 @@ pitch_names = sorted(df_core['pitch_name'].unique())
 print("\n===== 各球種特徵平均值 =====")
 print(df_core.groupby('pitch_name')[ALL_NUMERIC].mean().round(2).to_string())
 
-# F-ratio
 df_ana = df_core_raw[ALL_NUMERIC + ['pitch_name']].dropna(subset=['pitch_name'])
 pitch_names_ana = sorted(df_ana['pitch_name'].dropna().unique())
 n_total  = len(df_ana)
@@ -262,15 +249,11 @@ for feat, f in f_series.items():
 # ============================================================
 # STEP 5：相關係數分析 — 找出重複特徵
 # ============================================================
-# 高度相關的特徵對攜帶相同資訊，放進模型會造成冗餘
-# 標準：|correlation| > 0.9 視為高度重複，建議只保留其中一個
-
 print("\n===== STEP 5：特徵相關係數分析 =====")
 
 df_corr = df_core_raw[ALL_NUMERIC].dropna()
 corr_matrix = df_corr.corr()
 
-# ── 5-1：熱力圖 ──────────────────────────────────────────
 fig, ax = plt.subplots(figsize=(len(ALL_NUMERIC) * 0.9 + 2,
                                 len(ALL_NUMERIC) * 0.9 + 2))
 
@@ -282,7 +265,6 @@ ax.set_yticks(range(len(ALL_NUMERIC)))
 ax.set_xticklabels(ALL_NUMERIC, rotation=45, ha='right', fontsize=8)
 ax.set_yticklabels(ALL_NUMERIC, fontsize=8)
 
-# 在每格寫上數值（只寫 |r| > 0.5 的，避免太擠）
 for i in range(len(ALL_NUMERIC)):
     for j in range(len(ALL_NUMERIC)):
         val = corr_matrix.values[i, j]
@@ -297,7 +279,6 @@ plt.savefig('correlation_heatmap.png', dpi=150, bbox_inches='tight')
 plt.show()
 print("已儲存：correlation_heatmap.png")
 
-# ── 5-2：列出高度相關的特徵對 ────────────────────────────
 CORR_THRESHOLD = 0.9
 
 print(f"\n高度相關特徵對（|r| > {CORR_THRESHOLD}）：")
@@ -305,7 +286,6 @@ print(f"{'特徵 A':<30} {'特徵 B':<30} {'相關係數':>8}  建議")
 print("-" * 80)
 
 high_corr_pairs = []
-seen = set()
 
 for i, feat_a in enumerate(ALL_NUMERIC):
     for j, feat_b in enumerate(ALL_NUMERIC):
@@ -313,14 +293,11 @@ for i, feat_a in enumerate(ALL_NUMERIC):
             continue
         r = corr_matrix.loc[feat_a, feat_b]
         if abs(r) >= CORR_THRESHOLD:
-            # 保留 F-ratio 較高的那個
             keep    = feat_a if f_ratios.get(feat_a, 0) >= f_ratios.get(feat_b, 0) else feat_b
             discard = feat_b if keep == feat_a else feat_a
             high_corr_pairs.append((feat_a, feat_b, r, keep, discard))
             print(f"{feat_a:<30} {feat_b:<30} {r:>8.3f}  保留 {keep}，移除 {discard}")
 
-# ── 5-3：產生建議的最終特徵清單 ──────────────────────────
-# 從高度相關對中找出應移除的特徵（F-ratio 較低的那個）
 to_remove = set()
 for _, _, _, keep, discard in high_corr_pairs:
     to_remove.add(discard)
@@ -340,4 +317,46 @@ print(f"""
   保留原則：F-ratio 較高的特徵（對球種分類貢獻較大）
   最終保留 {len(FINAL_FEATURES)} 個特徵供後續分類模型使用
 """)
+
+
+# %%
+# ============================================================
+# STEP 6：左右投子集球種分布診斷（直接從原始資料分割）
+# ============================================================
+print("\n===== STEP 6：左右投子集球種分布診斷 =====")
+
+df_full = pd.read_csv('testdata_only_phy.csv')
+
+df_R = df_full[df_full['p_throws'] == 'R'].reset_index(drop=True)
+df_L = df_full[df_full['p_throws'] == 'L'].reset_index(drop=True)
+
+# 同時也存出來，之後 KNN 可以直接用
+df_R.to_csv('subset_R_full.csv', index=False)
+df_L.to_csv('subset_L_full.csv', index=False)
+print(f"已儲存：subset_R_full.csv（{len(df_R):,} 筆）")
+print(f"已儲存：subset_L_full.csv（{len(df_L):,} 筆）")
+
+MIN_SAMPLES = 200
+
+for label, df_sub in [('右投 (R)', df_R), ('左投 (L)', df_L)]:
+    print(f"\n{'='*50}")
+    print(f"  {label}：{len(df_sub):,} 筆")
+    print(f"{'='*50}")
+    print(f"  {'球種':<8} {'筆數':>8}   {'佔比':>6}   狀態")
+    print(f"  {'-'*40}")
+
+    counts_sub = df_sub['pitch_type'].value_counts()
+    total_sub  = len(df_sub)
+
+    for pitch, n in counts_sub.items():
+        pct  = n / total_sub * 100
+        flag = '✅' if n >= MIN_SAMPLES else '⚠  樣本不足'
+        print(f"  {pitch:<8} {n:>8,}   {pct:>5.1f}%   {flag}")
+
+    insufficient = counts_sub[counts_sub < MIN_SAMPLES]
+    if len(insufficient) > 0:
+        print(f"\n  ⚠  樣本不足球種：", list(insufficient.index))
+    else:
+        print(f"\n  ✅ 所有球種均 >= {MIN_SAMPLES} 筆")
+
 # %%
