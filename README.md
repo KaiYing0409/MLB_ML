@@ -77,7 +77,7 @@ python step3_classifier.py          # 約 3-5 分鐘
 
 **Step 1.3 — KC → CU 合併**
 
-指節曲球（Knuckle Curve, KC）和曲球（Curveball, CU）在物理特徵上高度相似，合併為同一類別以增加訓練樣本數。
+彈指曲球（Knuckle Curve, KC）和曲球（Curveball, CU）在物理特徵上高度相似，合併為同一類別以增加訓練樣本數。
 
 **Step 1.4 — 鏡像處理（消除左右投雙峰）**
 
