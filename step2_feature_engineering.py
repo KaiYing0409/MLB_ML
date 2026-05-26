@@ -1,7 +1,8 @@
 import numpy as np
 import pandas as pd
 
-# ============================================================
+#%%投手個人基準
+""" # ============================================================
 # 1. 設定區
 # ============================================================
 INPUT_PATH = 'testdata_only_phy.csv'       # Step 1 產出的【無鏡像版】
@@ -129,4 +130,104 @@ print("   'spin_axis_cos',")
 print("   'rel_release_speed',")
 print("   'rel_release_spin_rate',")
 print("   'ay']")
+print("============================================================") """
+
+#%%全聯盟基準
+# ============================================================
+# 1. 設定區
+# ============================================================
+INPUT_PATH = 'testdata_only_phy.csv'       # Step 1 產出的【無鏡像版】
+# ⚠️  注意：必須用無鏡像版，不能用 testdata_only_phy_mirror.csv
+#    原因：相對特徵以各投手 FF 基準線計算，若輸入已鏡像的資料
+#          左投水平量已被翻轉，基準線會失真，導致後續 LDA 左右投準確率崩潰
+OUTPUT_PATH = 'testdata_relative_phy.csv'   # 轉換後的相對特徵資料集（Step 3 的輸入）
+
+# 你目前 KNN/QDA 模型挑選出的核心物理特徵清單
+# 註：ay 屬於加速度，spin_axis 是角度（在下面會自動做 sin/cos 轉換）
+# 我們要對速度與位移這四大絕對物理量計算「相對速球差」
+ABS_FEATURES = [
+    'release_speed', 
+    'release_spin_rate', 
+    'api_break_x_arm', 
+    'api_break_z_with_gravity'
+]
+
+# 邊緣人投手過濾門檻：兩年內（2024-2025）總投球數低於此值的投手直接剔除
+MIN_PITCHES_THRESHOLD = 50 
+
+print("===== STEP 1：讀取原始資料 =====")
+df = pd.read_csv(INPUT_PATH)
+n_original = len(df)
+print(f"原始資料筆數：{n_original:,} 筆")
+
+# ============================================================
+# 2. 砍掉邊緣人投手（資料清洗）
+# ============================================================
+print("\n===== STEP 2：過濾樣本數過低的邊緣人投手 =====")
+pitcher_counts = df['pitcher'].value_counts()
+low_sample_pitchers = pitcher_counts[pitcher_counts < MIN_PITCHES_THRESHOLD].index
+
+df_cleaned = df[~df['pitcher'].isin(low_sample_pitchers)].reset_index(drop=True)
+n_after_filter = len(df_cleaned)
+
+print(f"被移除的邊緣人投手人數：{len(low_sample_pitchers)} 人")
+print(f"移除邊緣人後剩餘資料：{n_after_filter:,} 筆（砍掉了 {n_original - n_after_filter:,} 筆）")
+
+# ============================================================
+# 3. 計算基準線（全聯盟 FF 均值）
+# ============================================================
+print("\n===== STEP 3：計算全聯盟四縫線速球 (FF) 基準線 =====")
+
+# 用全聯盟 FF 均值作為統一基準線
+# 好處：訓練與預測時基準線一致，不需要知道投手身分
+df_ff_global = df_cleaned[df_cleaned['pitch_type'] == 'FF']
+global_ff_baseline = df_ff_global[ABS_FEATURES].mean()
+
+print("全聯盟四縫線速球 (FF) 全局均值：")
+for feat in ABS_FEATURES:
+    print(f"  {feat}: {global_ff_baseline[feat]:.2f}")
+
+# ============================================================
+# 4. 生成相對特徵（向量化運算）
+# ============================================================
+print("\n===== STEP 4：以全聯盟 FF 均值為基準計算相對特徵 =====")
+
+df_rel = df_cleaned.copy()
+
+# 直接向量化計算，不需要逐筆 lookup
+for feat in ABS_FEATURES:
+    df_rel[f'rel_{feat}'] = df_rel[feat] - global_ff_baseline[feat]
+
+print(f"  相對特徵計算完成：{[f'rel_{f}' for f in ABS_FEATURES]}")
+
+# 將計算好的相對特徵塞回 DataFrame（保留此行以銜接後續步驟）
+
+# ============================================================
+# 5. 進階特徵工程：旋轉軸角度 (spin_axis) 週期性邊界轉換
+# ============================================================
+print("\n===== STEP 5：將角度特徵 spin_axis 轉換為二維正餘弦軌道 =====")
+# 修正角度在 0°/360° 連續變數計算距離時的突變盲點
+df_rel['spin_axis_rad'] = np.radians(df_rel['spin_axis'])
+df_rel['spin_axis_sin'] = np.sin(df_rel['spin_axis_rad'])
+df_rel['spin_axis_cos'] = np.cos(df_rel['spin_axis_rad'])
+
+# ============================================================
+# 6. 輸出成果與後續對照
+# ============================================================
+print("\n===== STEP 6：儲存對齊後的全新資料集 =====")
+df_rel.to_csv(OUTPUT_PATH, index=False)
+print(f"成功儲存！新檔案路徑：{OUTPUT_PATH}")
+
+# 同時把全聯盟 FF 基準線存起來，供 predict.py 使用
+import pickle
+with open('global_ff_baseline.pkl', 'wb') as f:
+    pickle.dump(global_ff_baseline.to_dict(), f)
+print("已儲存：global_ff_baseline.pkl（供 predict.py 載入使用）")
+
+print("\n【特徵工程完成！進入分類器的特徵組合】")
+print("  相對特徵（以全聯盟 FF 均值為基準）：")
+print("    rel_release_speed, rel_release_spin_rate,")
+print("    rel_api_break_x_arm, rel_api_break_z_with_gravity")
+print("  角度轉換特徵：spin_axis_sin, spin_axis_cos")
+print("  原始特徵：ay, vy0, pfx_x, ax, vx0, arm_angle")
 print("============================================================")
