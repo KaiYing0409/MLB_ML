@@ -11,38 +11,6 @@ predict.py
   python predict.py
 """
 
-'''
-input
-
-=======================================================
-  棒球球種分類器 — 單筆預測
-=======================================================
-請輸入投球物理特徵（來源：MLB Statcast）
-
-  球速 release_speed (mph)：84
-  轉速 release_spin_rate (rpm)：2000
-  旋轉軸 spin_axis (0-360°)：210
-  水平位移 api_break_x_arm (英吋)：-8.2
-  垂直位移 api_break_z_with_gravity (英吋)：28.5
-  水平位移 pfx_x (英吋)：-6.1
-  水平加速度 ax (ft/s²)：-8.4
-  水平初速 vx0 (ft/s)：-6.2
-  縱向加速度 ay (ft/s²)：27.3
-  縱向初速 vy0 (ft/s)：-138.1
-  手臂角度 arm_angle (度)：28.5
-  投手慣用手 p_throws (R/L)：R
-
-output
-=======================================================
-  預測結果
-=======================================================
-  球種        ：SI  伸卡球 Sinker
-  信心分數    ：1.0000  （高信心）
-  投手慣用手  ：L
-  第二層觸發  ：否
-=======================================================
-(base) zhengkaiying@macbookairdrop 機器學習final_project % 
-'''
 import numpy as np
 import pickle
 
@@ -129,9 +97,6 @@ class BinaryLDA:
 with open('model.pkl', 'rb') as f:
     model = pickle.load(f)
 
-with open('global_ff_baseline.pkl', 'rb') as f:
-    ff_baseline = pickle.load(f)
-
 lda_hand      = model['lda_hand']
 lda_mu        = model['lda_mu']
 lda_sig       = model['lda_sig']
@@ -155,21 +120,12 @@ def zscore_transform(X, mu, sig):
 
 def compute_features(raw: dict) -> dict:
     """
-    輸入原始物理特徵，輸出分類器所需的完整特徵 dict。
-    包含：相對特徵計算、spin_axis sin/cos 轉換。
+    輸入原始物理特徵，計算 spin_axis sin/cos 轉換。
     """
     feats = dict(raw)
-
-    # 相對特徵（以全聯盟 FF 均值為基準）
-    for col in ['release_speed', 'release_spin_rate',
-                'api_break_x_arm', 'api_break_z_with_gravity']:
-        feats[f'rel_{col}'] = raw[col] - ff_baseline[col]
-
-    # spin_axis 週期性轉換
     rad = np.radians(raw['spin_axis'])
     feats['spin_axis_sin'] = np.sin(rad)
     feats['spin_axis_cos'] = np.cos(rad)
-
     return feats
 
 def predict_pitch(raw: dict) -> dict:
@@ -248,13 +204,6 @@ def get_float(prompt):
         except ValueError:
             print("  請輸入數字。")
 
-def get_hand(prompt):
-    while True:
-        val = input(prompt).strip().upper()
-        if val in ['R', 'L']:
-            return val
-        print("  請輸入 R（右投）或 L（左投）。")
-
 def main():
     print("\n" + "=" * 55)
     print("  棒球球種分類器 — 單筆預測")
@@ -273,7 +222,6 @@ def main():
         'ay':                         get_float("  縱向加速度 ay (ft/s²)："),
         'vy0':                        get_float("  縱向初速 vy0 (ft/s)："),
         'arm_angle':                  get_float("  手臂角度 arm_angle (度)："),
-        'p_throws':                   get_hand( "  投手慣用手 p_throws (R/L)："),
     }
 
     result = predict_pitch(raw)
