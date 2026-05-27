@@ -361,3 +361,44 @@ streamlit run finalproject_baseballmodelapp.py
 ```bash
 pip install streamlit scipy
 ```
+
+# MLB 混合式投球分析與優化系統 (Hybrid Pitch Analytics System)
+
+## 專案簡介
+本專案旨在打造一套端到端 (End-to-End) 投球分析系統」。
+我們採用 **「預測分類 (機器學習)」** 與 **「物理診斷 (多變數統計)」** 結合的雙引擎架構，不僅能辨識球種，還能針對投手的控球執行力給出具備物理可解釋性的評分與修正誤差值。
+
+---
+
+## 目前系統開發進度 (Current Progress)
+
+### 馬氏靶心控球優化引擎 (Command Evaluation) - [開發中]
+* **Phase 1：建立黃金基準池 (Success Similarity Pool) - [已完成]**
+  * 邏輯：動態接收模組 A 的球種判定，從 Statcast 歷史數據中篩選出「成功落入目標九宮格」且「投手身體條件 (出手點、延伸距離) 最相似」的 Top 100 顆黃金標準球。
+* **Phase 2：物理常識與靶心萃取 (Target Stats Extraction) - [已完成]**
+  * 邏輯：計算黃金標準池在核心特徵（球速、轉速、轉軸）上的**平均值 (完美靶心)** 與 **3x3 共變異數矩陣 (Covariance Matrix)**，藉此捕捉特徵間的物理連動性（如球速與轉速的正相關）。
+* **Phase 3：馬氏距離計分引擎 (Confidence Scoring) - [已完成]**
+  * 邏輯：利用共變異數矩陣的反矩陣過濾物理副作用，計算測試球與完美靶心的「馬哈拉諾比斯距離」，並透過常態分佈衰減曲線轉換為 `0~100%` 的進壘信心度，同時精準計算各參數的真實物理誤差。
+* **Phase 4：教練自動回饋生成 (Coach Feedback) - [🚧 待開發]**
+  * 邏輯：將 Phase 3 算出的誤差字典，透過邏輯判斷式轉換成具體的文字修正建議。
+
+### 🟢 系統端點串接 (Pipeline Integration) - [已完成]
+* 成功建立 `run_hybrid_ai_system` 總控管線。
+* 實現資料流串接：單筆測試資料 ➡️ 模組 A (輸出球種) ➡️ 模組 B (動態篩選靶心並打分) ➡️ 輸出綜合報告。
+
+---
+
+## ⚙️ 系統架構與資料流向 (Data Flow)
+
+當系統接收到一顆全新投球的 12 項原始數據時，處理流程如下：
+1. **[Node A - 辨識]** `predict_pitch(raw_data)` 判定球種（例：這是一顆滑球 SL）。
+2. **[Node B1 - 篩選]** 根據判定的 'SL' 與目標落點（例：9號位），在歷史資料庫中尋找相似投手的成功軌跡。
+3. **[Node B2 - 建模]** 算出該情境下的完美平均值 $\mu$ 與共變異數矩陣 $\Sigma$。
+4. **[Node B3 - 評分]** 算出該測試球的馬氏距離與落點信心度。
+5. **[Output]** 統整輸出：球種、信心度分數、物理參數誤差字典。
+
+---
+
+## 🛠️ 下一步開發計畫 (Next Steps)
+1. **完成 Phase 4 開發：** 撰寫 `generate_coach_feedback(deltas)` 函式，完成白話文建議輸出。
+2. **整合球路品質系統 (Stuff+)：** 將球威評分模組以「平行處理 (Parallel Processing)」的方式接入主管線，達成 Command+ 與 Stuff+ 的雙指標綜合評估。
