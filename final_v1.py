@@ -126,6 +126,37 @@ def run_phase2_analysis(pool_df, optimization_features=None):
 
     return target_mean, target_covariance
 
+# phase 3 
+
+def evaluate_pitch_confidence(current_pitch, target_mean, target_covariance):
+    """
+    Phase 3：計算馬哈拉諾比斯距離，並轉換為 0~100% 的落點信心度
+    """
+    # 規定優化特徵順序 (和 Phase 2 一樣)
+    opt_features = ['release_speed', 'release_spin_rate', 'spin_axis']
+    
+    # 1. 將數據轉成向量 (x)
+    x = np.array([current_pitch[feat] for feat in opt_features])
+    
+    # 2. 計算與完美靶心的「物理誤差」 (delta = x - mu)
+    delta_vector = x - target_mean
+    
+    # 3. 計算共變異數矩陣的反矩陣 (用 pinv 避免數學報錯)
+    cov_inv = np.linalg.pinv(target_covariance)
+    
+    # 4. 馬氏距離公式： D = sqrt( delta^T * cov_inv * delta )
+    distance_squared = np.dot(np.dot(delta_vector, cov_inv), delta_vector)
+    mahalanobis_dist = np.sqrt(max(0, distance_squared)) # max(0) 是保護機制，避免浮點數微小負值
+    
+    # 5. 轉換為 0~100 的信心度 (使用常態分佈衰減曲線)
+    # -0.5 是一個常數，如果你覺得系統給分太嚴格，可以改成 -0.2；覺得太鬆可以改成 -1.0
+    confidence_score = np.exp(-0.5 * (mahalanobis_dist ** 2)) * 100
+    
+    # 6. 把誤差打包成字典，準備交給 Phase 4 
+    deltas_dict = {feat: diff for feat, diff in zip(opt_features, delta_vector)}
+    
+    return confidence_score, mahalanobis_dist, deltas_dict
+
 
 # ==========================================
 # 測試區 
@@ -152,6 +183,26 @@ try:
     print(pool_df[['pitch_type', 'zone', 'release_pos_x', 'release_pos_z', 'release_extension', 'physical_distance']].head(10))
 
     # phase 2 :
-    run_phase2_analysis(pool_df)
+    target_mean, target_covariance = run_phase2_analysis(pool_df)
+
+    # phase 3 :
+    sample_current_pitch = {
+        'release_speed': 85.0,
+        'release_spin_rate': 2300.0,
+        'spin_axis': 210.0
+    }
+    confidence_score, mahalanobis_dist, deltas_dict = evaluate_pitch_confidence(
+        current_pitch=sample_current_pitch,
+        target_mean=target_mean,
+        target_covariance=target_covariance
+    )
+
+    print("\n=== Phase 3 結果 ===")
+    print(f"測試球：{sample_current_pitch}")
+    print(f"馬哈拉諾比斯距離：{mahalanobis_dist:.4f}")
+    print(f"落點信心度：{confidence_score:.2f}%")
+    print("偏差值 (current - target_mean):")
+    for feat, diff in deltas_dict.items():
+        print(f" * {feat}: {diff:.4f}")
 except Exception as e:
     print("測試過濾器時發生錯誤：", e)
