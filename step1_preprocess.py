@@ -8,8 +8,44 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import matplotlib.font_manager as fm
+import matplotlib as mpl
+import os
 
-plt.rcParams['font.family'] = 'Noto Serif TC'    
+
+def set_noto_tc_font(fallback_ttf_path: str | None = None):
+    """嘗試設定 `Noto Serif TC` 為 matplotlib 字型。
+    還原順序：
+      1. 系統已安裝的 'Noto Serif TC'
+      2. 傳入的 ttf 檔路徑（存在則加入 font manager）
+      3. 常見的 Windows 中文字型備援
+      4. 不改變字型，只關閉 unicode_minus 警告
+    """
+    font_name = 'Noto Serif TC'
+
+    # 1) 系統已安裝
+    if any(font_name == f.name for f in fm.fontManager.ttflist):
+        mpl.rcParams['font.family'] = font_name
+    else:
+        # 2) 傳入 ttf 檔路徑
+        if fallback_ttf_path and os.path.exists(fallback_ttf_path):
+            try:
+                fm.fontManager.addfont(fallback_ttf_path)
+                mpl.rcParams['font.family'] = fm.FontProperties(fname=fallback_ttf_path).get_name()
+            except Exception:
+                pass
+        else:
+            # 3) 常見備援字型（Windows / 常用跨平台）
+            for alt in ['Microsoft JhengHei', 'Noto Sans TC', 'Noto Sans CJK TC', 'SimHei', 'Arial Unicode MS']:
+                if any(alt == f.name for f in fm.fontManager.ttflist):
+                    mpl.rcParams['font.family'] = alt
+                    break
+
+    # 顯示負號需正確
+    mpl.rcParams['axes.unicode_minus'] = False
+
+
+# 若想指定本機 ttf 路徑，可把路徑傳入 set_noto_tc_font()
+set_noto_tc_font()
 
 
 #%%

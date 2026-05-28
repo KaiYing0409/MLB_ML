@@ -48,25 +48,26 @@ PITCH_FEATURES = [
     'api_break_z_with_gravity',
     'spin_axis_sin',
     'spin_axis_cos',
-    'release_speed',
-    'release_spin_rate',
+    'rel_release_speed',
+    'rel_release_spin_rate',
     'ay',
+    # new for SL/FC/ST
     'vy0',
 ]
 
 LDA_FEATURES = [
     'pfx_x', 'ax', 'vx0', 'spin_axis_sin', 'spin_axis_cos',
-    'arm_angle', 'api_break_x_arm',
-    'release_speed', 'release_spin_rate',
+    'arm_angle', 'rel_api_break_x_arm',
+    'rel_release_speed', 'rel_release_spin_rate',
 ]
 
 # weighted=False → 幾何中點（保護大宗球種）
 # weighted=True  → 加權閾值（保護小宗球種）
 PREDEFINED_PAIRS = {
-    ('CH', 'FS'): {'feats': ['release_spin_rate', 'api_break_x_arm', 'spin_axis_sin', 'api_break_z_with_gravity'], 'weighted': False},
-    ('FC', 'SL'): {'feats': ['api_break_z_with_gravity', 'release_speed', 'spin_axis_cos', 'api_break_x_arm'], 'weighted': True},
-    ('SL', 'ST'): {'feats': ['api_break_x_arm', 'release_speed', 'spin_axis_cos', 'release_spin_rate'], 'weighted': True},
-    ('CU', 'ST'): {'feats': ['api_break_z_with_gravity', 'spin_axis_cos', 'release_speed', 'api_break_x_arm'], 'weighted': True},
+    ('CH', 'FS'): {'feats': ['rel_release_spin_rate', 'rel_api_break_x_arm', 'spin_axis_sin', 'rel_api_break_z_with_gravity'], 'weighted': False},
+    ('FC', 'SL'): {'feats': ['rel_api_break_z_with_gravity', 'rel_release_speed', 'spin_axis_cos', 'rel_api_break_x_arm'], 'weighted': True},
+    ('SL', 'ST'): {'feats': ['rel_api_break_x_arm', 'rel_release_speed', 'spin_axis_cos', 'rel_release_spin_rate'], 'weighted': True},
+    ('CU', 'ST'): {'feats': ['rel_api_break_z_with_gravity', 'spin_axis_cos', 'rel_release_speed', 'rel_api_break_x_arm'], 'weighted': True},
 }
 
 MARGIN_LIST = [0.05, 0.10, 0.15, 0.20, 0.30, 0.40, 0.50]
