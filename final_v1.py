@@ -251,33 +251,33 @@ my_pitcher = {
     'release_pos_z': 5.5,
     'release_extension': 6.5
 }
+if __name__ == '__main__':
+    try:
+        # 新串接函式測試：
+        raw_pitch_input = {
+            'release_speed': 91,
+            'release_spin_rate': 2010,
+            'spin_axis': 225.0,
+            'api_break_x_arm': -4.2,
+            'api_break_z_with_gravity': 30.5,
+            'pfx_x': -2.3,
+            'pfx_z': 1.5,
+            'ax': -6.8,
+            'vx0': -4.9,
+            'ay': 26.8,
+            'vy0': -135.5,
+            'arm_angle': 28.0,
+            'p_throws': 'R'
+        }
 
-try:
-    # 新串接函式測試：
-    raw_pitch_input = {
-        'release_speed': 91,
-        'release_spin_rate': 2010,
-        'spin_axis': 225.0,
-        'api_break_x_arm': -4.2,
-        'api_break_z_with_gravity': 30.5,
-        'pfx_x': -2.3,
-        'pfx_z': 1.5,
-        'ax': -6.8,
-        'vx0': -4.9,
-        'ay': 26.8,
-        'vy0': -135.5,
-        'arm_angle': 28.0,
-        'p_throws': 'R'
-    }
-
-    result = run_hybrid_ai_system(
-        raw_pitch_data=raw_pitch_input,
-        target_zone=9,
-        pitcher_profile=my_pitcher,
-        df_database=df_clean
-    )
-
-    print("\n=== 新串接函式 run_hybrid_ai_system 測試結果 ===")
-    print(result)
-except Exception as e:
-    print("測試過濾器時發生錯誤：", e)
+        result = run_hybrid_ai_system(
+            raw_pitch_data=raw_pitch_input,
+            target_zone=9,
+            pitcher_profile=my_pitcher,
+            df_database=df_clean
+        )
+    
+        print("\n=== 新串接函式 run_hybrid_ai_system 測試結果 ===")
+        print(result)
+    except Exception as e:
+        print("測試過濾器時發生錯誤：", e)
