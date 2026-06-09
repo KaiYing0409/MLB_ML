@@ -2,309 +2,276 @@
 
 利用 MLB Statcast 投球物理數據，透過階層式分類架構（QDA + BinaryLDA）對球種進行自動分類。
 
----
+# MLB 投球球種分類器 — 架構與使用說明
 
-## 專案結構
+## 概述
 
-```
-├── README.md
-├── step1_preprocess_eda.py       # 資料前處理 + EDA + F-ratio 特徵分析
-├── step2_feature_engineering.py  # 相對特徵工程（投手基準線對齊 + spin_axis 轉換）
-├── step3_classifier.py           # 主分類器（LDA → QDA → BinaryLDA 階層式架構）
-└── data/
-    ├── statcast_bat_tracking_2024_2025.csv   # 原始資料（需自行下載，見下方說明）
-    ├── testdata_only_phy.csv                 # Step 1 產出（無鏡像，10萬筆）← Step 2 的輸入
-    ├── testdata_only_phy_mirror.csv          # Step 1 產出（有鏡像，僅供 EDA/F-ratio 參考）
-    └── testdata_relative_phy.csv             # Step 2 產出（相對特徵）← Step 3 的輸入
-```
+本分類器使用 MLB Statcast 系統提供的投球物理量測數據，對 8 種球種進行分類。分類器採用**階層式 QDA（Quadratic Discriminant Analysis）架構**，所有模型皆以 NumPy 手刻實作，不使用 sklearn。
 
----
+### 分類目標（8 種球種）
 
-## 快速開始
-
-### 1. 安裝環境
-
-```bash
-pip install numpy pandas matplotlib scipy
-```
-
-### 2. 取得資料
-
-原始資料來源：[MLB Statcast + Bat Tracking (Kaggle)](https://www.kaggle.com/)
-
-下載後將 `statcast_bat_tracking_2024_2025.csv` 放到專案根目錄。
-
-### 3. 依序執行三支腳本
-
-```bash
-python step1_preprocess_eda.py      # 約 2-5 分鐘
-python step2_feature_engineering.py # 約 1-2 分鐘
-python step3_classifier.py          # 約 3-5 分鐘
-```
-
----
-
-## 資料處理流程（Step 1）
-
-### 使用的物理特徵欄位
-
-| 類別 | 欄位名稱 | 說明 |
+| 代碼 | 球種名稱 | 大類 |
 |------|---------|------|
-| 球速 | `release_speed` | 出手球速 (mph) |
-| 球速 | `effective_speed` | 有效球速（含出手延伸修正） |
-| 旋轉 | `release_spin_rate` | 轉速 (rpm) |
-| 旋轉 | `spin_axis` | 旋轉軸方向 (0–360°) |
-| 位移 | `api_break_x_arm` | 水平位移（投手手臂方向，英吋） |
-| 位移 | `api_break_z_with_gravity` | 垂直位移（含重力，英吋） |
-| 位移 | `pfx_x`, `pfx_z` | 水平/垂直位移（去除重力） |
-| 加速度 | `ax`, `ay`, `az` | 加速度三分量 |
-| 出手 | `release_pos_x/y/z` | 出手點座標 |
-| 其他 | `p_throws` | 投手慣用手（L/R），用於左右投分類 |
+| FF | 四縫線速球 Four-Seam Fastball | Fastball |
+| SI | 伸卡球 Sinker | Fastball |
+| FC | 卡特球 Cutter | Fastball |
+| SL | 滑球 Slider | Breaking |
+| ST | 橫掃滑球 Sweeper | Breaking |
+| CU | 曲球 Curveball | Breaking |
+| CH | 變速球 Changeup | Offspeed |
+| FS | 分叉球 Splitter | Offspeed |
 
-### 資料清理步驟
-
-**Step 1.1 — 球種篩選**
-
-保留佔全資料比例 ≥ 1% 的球種，去除樣本數不足的罕見球種。
-
-**Step 1.2 — 離群值移除**
-
-對每個球種分別進行 IQR 清洗（k=3.0），避免跨球種的分布差異影響離群值判斷。
-
-```
-離群值定義：超出 [Q1 - 3×IQR, Q3 + 3×IQR] 範圍的數值
-```
-
-**Step 1.3 — KC → CU 合併**
-
-彈指曲球（Knuckle Curve, KC）和曲球（Curveball, CU）在物理特徵上高度相似，合併為同一類別以增加訓練樣本數。
-
-**Step 1.4 — 鏡像處理（消除左右投雙峰）**
-
-左投與右投在水平方向的物理量（pfx_x、ax、vx0、spin_axis）上呈現對稱鏡像分布，若不處理會造成同一球種在特徵空間中出現雙峰，嚴重影響分類器效果。
-
-做法：將左投資料的水平方向特徵翻轉至右投視角：
-
-```python
-# 水平量直接取負號
-df_L['pfx_x'] = -df_L['pfx_x']
-df_L['ax']    = -df_L['ax']
-df_L['vx0']   = -df_L['vx0']
-
-# spin_axis 沿鏡像軸翻轉（鏡像軸 = 左右投均值的角平分線）
-df_L['spin_axis'] = (2 * MIRROR_AXIS - df_L['spin_axis']) % 360
-```
-
-鏡像後同一球種的分布從雙峰變為單峰，F-ratio 大幅提升。
-
-Step 1 產出兩個抽樣檔案：
-- `testdata_only_phy_mirror.csv`：鏡像版，**僅用於 EDA 和 F-ratio 分析**
-- `testdata_only_phy.csv`：無鏡像版，**作為 Step 2 的輸入**
-
-> ⚠️ Step 2 必須吃無鏡像版。相對特徵是以每位投手自身的 FF 為基準計算的，若輸入已鏡像的資料，左投的水平量已被翻轉，算出的基準線會失真，導致後續 LDA 左右投分類器準確率崩潰（實測從 92% 掉至 57%）。
+> KC（彈指曲球 Knuckle Curve）已合併至 CU。詳見 `KC_CU_合併理由.md`。
 
 ---
 
-## 特徵工程（Step 2）
+## 架構
 
-輸入：`testdata_only_phy.csv`（無鏡像版）
-產出：`testdata_relative_phy.csv`
+```
+輸入（單筆投球物理數據 + 投手慣用手 p_throws）
+    │
+    ├── p_throws = R ──┐
+    └── p_throws = L ──┤
+                       │
+              ┌────────▼────────┐
+              │  Layer 1 QDA    │
+              │ （三大類分類）    │
+              │  特徵：9 個      │
+              └────────┬────────┘
+                       │
+         ┌─────────────┼─────────────┐
+         ▼             ▼             ▼
+    ┌─────────┐  ┌──────────┐  ┌──────────┐
+    │Fastball │  │ Breaking │  │ Offspeed │
+    │QDA (3特徵)│ │QDA (9特徵)│ │          │
+    │FF/SI/FC │  │SL/ST/CU  │  │ R: QDA   │
+    └─────────┘  └──────────┘  │   (8特徵) │
+                               │   CH/FS  │
+                               │ L: → CH  │
+                               └──────────┘
+```
 
-### 相對特徵：以投手四縫線速球為基準
+### Layer 1：三大類 QDA
 
+將投球分為 Fastball / Breaking / Offspeed 三大類。左右投各一個獨立的 QDA 模型。
 
-~~不同投手的球速、轉速等物理量有個體差異（例如 160 km/h 投手的變速球和 150 km/h 投手的變速球，絕對球速不同，但相對差距可能相近）。相對化後，模型學到的是「這顆球相對於該投手正常速球的差異」，比絕對數值更能反映球種的本質。~~
+### Layer 2：子分類器
 
-~~做法：計算每位投手的四縫線速球（FF）平均值作為基準線，對其他球種計算差值：~~
+根據 Layer 1 的預測結果，routing 至對應的子分類器：
 
-~~若該投手無 FF 資料，使用全聯盟 FF 均值替代。~~
+| 子分類器 | 球種 | 說明 |
+|---------|------|------|
+| Fastball R/L | FF, SI, FC | 左右投共用同一組特徵，各自獨立訓練 |
+| Breaking R/L | SL, ST, CU | 同上 |
+| Offspeed R | CH, FS | 僅右投建模 |
+| Offspeed L | — | 左投 FS 樣本極少（約 2 筆），直接輸出 CH |
 
-## 5/28更新：考量到輸入的特徵並沒有每個投手的ID，因此得不到輸入的相對特徵（輸入資料沒有參考基準）。所以取消使用以上以每個選手作為基準得出的相對特徵，直接使用絕對特徵
-~~樣本數低於 50 球的邊緣人投手直接剔除。~~
+---
 
-### spin_axis 週期性轉換
+## 特徵
 
-旋轉軸是 0–360° 的循環變數，直接使用數值會有邊界突變問題（例如 5° 和 355° 實際上只差 10°，但數值差 350°）。
+### 選用原則
 
-做法：轉換為二維向量：
+僅使用**球本身飛行過程中的物理量**，排除以下類型的特徵：
 
-```python
-spin_axis_sin = sin(spin_axis_rad)
-spin_axis_cos = cos(spin_axis_rad)
+| 排除類型 | 排除欄位 | 理由 |
+|---------|---------|------|
+| 投手身體特徵 | `release_pos_x/z/y`, `release_extension`, `arm_angle` | 反映投手個人投球機制，非球的物理特性。不同投手投同一球種出手點差異大，納入會過擬合特定投手習慣。 |
+| 投球結果 | `plate_x`, `plate_z`, `zone` | 球到壘板的位置是投球結果，不是物理輸入。 |
+| 打者相關 | `api_break_x_batter_in`, `sz_top`, `sz_bot`, `stand` | 含打者視角偏差或打者身高資訊。 |
+| 高度冗餘 | `effective_speed`, `vy0`, `ax`, `az`, `pfx_z` | 與保留特徵的 Pearson 相關係數 |r| > 0.9，攜帶相同資訊。 |
+
+### 最終特徵清單（9 個）
+
+| 特徵 | 說明 | 單位 |
+|------|------|------|
+| `release_speed` | 出手球速 | mph |
+| `release_spin_rate` | 轉速 | rpm |
+| `spin_axis_sin` | sin(旋轉軸角度) | — |
+| `spin_axis_cos` | cos(旋轉軸角度) | — |
+| `pfx_x` | 水平位移（去除重力） | 英吋 |
+| `api_break_z_with_gravity` | 垂直位移（含重力） | 英吋 |
+| `vx0` | 出手水平初速 | ft/s |
+| `vz0` | 出手垂直初速 | ft/s |
+| `ay` | 縱向加速度 | ft/s² |
+
+> `spin_axis`（0–360°）為循環變數，直接使用會有 0°/360° 邊界問題（CU 右投分布跨越邊界，邊界樣本佔 6.4%）。因此分解為 sin/cos 兩個線性特徵。
+
+### 各層特徵配置
+
+**Layer 1（三大類，9 個特徵）：**
+`spin_axis_sin`, `api_break_z_with_gravity`, `release_speed`, `pfx_x`, `spin_axis_cos`, `release_spin_rate`, `ay`, `vx0`, `vz0`
+
+**Fastball 子分類器（3 個特徵）：**
+`pfx_x`, `api_break_z_with_gravity`, `spin_axis_sin`
+
+**Breaking 子分類器（9 個特徵，全部）：**
+`api_break_z_with_gravity`, `pfx_x`, `release_speed`, `spin_axis_cos`, `vz0`, `spin_axis_sin`, `release_spin_rate`, `vx0`, `ay`
+
+**Offspeed 子分類器（8 個特徵，右投專用）：**
+`release_spin_rate`, `pfx_x`, `api_break_z_with_gravity`, `vx0`, `spin_axis_sin`, `spin_axis_cos`, `release_speed`, `vz0`
+
+> 特徵數量由 Sequential Forward Selection 決定：依 F-ratio 排序逐步加入特徵，在驗證集上找準確率不再顯著提升的 elbow 點。
+
+---
+
+## 特徵選擇流程
+
+```
+所有物理特徵（22 個）
+    │
+    ▼
+排除非球體物理特徵（投手身體、投球結果、打者相關）
+    │
+    ▼
+剩餘 14 個特徵
+    │
+    ▼
+相關係數篩選（左右投分開計算，|r| > 0.9 取聯集移除）
+    │
+    ▼
+剩餘 9 個特徵
+    │
+    ▼
+F-ratio 排序（左右投分開，按三大類 / 各大類內部分別計算）
+    │
+    ▼
+Sequential Forward Selection（依 F-ratio 排序逐步加入，驗證集找 elbow）
+    │
+    ▼
+各層 / 各大類的最終特徵清單
 ```
 
 ---
 
-## 分類器架構（Step 3）
+## 資料前處理
 
-### 各模組的特徵選擇邏輯
-
-本專案三個分類模組使用不同的特徵組合，各有設計依據：
-
-| 模組 | 特徵類型 | 設計理由 |
-|------|---------|---------|
-| LDA 左右投分類 | 絕對水平量為主，混入部分相對特徵 | 見下方說明 |
-| QDA 球種分類 | 絕對位移 + 相對速度/轉速 | SL/FC/ST 的絕對位移 F-ratio 最高（19009），相對化反而削弱信號 |
-| BinaryLDA 第二層 | 相對特徵為主 | 混淆球種之間的精細區分，消除投手個體差異後效果更好 |
-
-**LDA 左右投分類的特徵設計：**
-
-```python
-LDA_FEATURES = [
-    'pfx_x', 'ax', 'vx0',           # 絕對水平量：左右投鑑別主力
-    'spin_axis_sin', 'spin_axis_cos', # 旋轉軸（週期轉換後）
-    'arm_angle',                      # 手臂角度
-    'rel_api_break_x_arm',            # 相對水平位移（輔助）
-    'rel_release_speed',              # 相對球速（輔助）
-    'rel_release_spin_rate',          # 相對轉速（輔助）
-]
-```
-
-主力特徵是 `pfx_x`、`ax`、`vx0` 這三個絕對水平量，左右投在這些方向上有明顯的鏡像對稱，LDA 可以找到最大分離度的投影軸。
-
-額外混入三個相對特徵（`rel_api_break_x_arm`、`rel_release_speed`、`rel_release_spin_rate`）的目的：LDA 是整個 pipeline 的第一關，它「見過」這些特徵的尺度之後，能確保後續 QDA 和 BinaryLDA 在使用相同特徵時不會有數值尺度上的落差，是一種跨模組的特徵尺度一致性保障。
-
-### Pipeline 全貌
+### 流程（step2_preprocess.py）
 
 ```
-輸入：一筆投球的物理特徵向量
-        │
-        ▼
-┌───────────────────────────────────────┐
-│  LDA 左右投分類器                       │  驗證集準確率 92.16%
-│  BinaryLDA（Fisher's LDA）             │
-│  主力：pfx_x, ax, vx0                  │
-│  輔助：rel_api_break_x_arm 等          │
-└───────────────────────────────────────┘
-        │ 右投 (R)              │ 左投 (L)
-        ▼                       ▼
-┌──────────────┐       ┌──────────────┐
-│   QDA_R      │       │   QDA_L      │  第一層 Macro 82.2%
-│  右投球種     │       │  左投球種      │
-│  分類器       │       │  分類器       │
-└──────────────┘       └──────────────┘
-        │
-        ▼
-┌───────────────────────────────┐
-│  信心評估                      │
-│  margin = P(top1) - P(top2)   │
-│  threshold = 0.5（驗證集選定）  │
-└───────────────────────────────┘
-        │ margin ≥ 0.5               │ margin < 0.5（不確定）
-        ▼                            ▼
-  直接輸出第一層結果         ┌─────────────────────────┐
-                          │  第二層：BinaryLDA       │
-                          │  只針對已知混淆球種對      │
-                          │  CH↔FS / FC↔SL / SL↔ST  │
-                          │  CU↔ST                  │
-                          └─────────────────────────┘
-        │
-        ▼
-最終預測球種  ← 最終 Macro 83.3%
+statcast_bat_tracking_2024_2025.csv（原始資料）
+    │
+    ▼ 去除 pitch_type 缺值
+    ▼ 過濾佔比 < 1% 的球種（決定分類目標）
+    ▼ KC → CU 合併（第一版分類器迭代後的決策）
+    ▼ IQR 離群移除（按 pitch_type × p_throws 分組，k=3）
+    │   └── spin_axis：循環感知 IQR（平移至 180° 後計算，避免邊界誤刪）
+    │   └── 其他特徵：標準 IQR
+    ▼ 移除模型特徵欄位缺值
+    ▼ spin_axis → sin/cos 轉換
+    ▼ 分層抽樣 10 萬筆（seed=42）
+    │
+    ▼
+testdata_only_phy.csv
 ```
 
-### 各層說明
+### 循環感知 IQR
 
-**LDA 左右投分類**
+`spin_axis` 為 0–360° 的循環變數，傳統 IQR 在邊界附近會誤判。處理方式：
 
-Fisher's Linear Discriminant，二元分類左投/右投。左右投的水平物理量（pfx_x、vx0 等）具有明顯的鏡像對稱性，LDA 能找到最大分離度的投影軸。驗證集準確率 92.16%。
-
-**QDA 球種分類（第一層）**
-
-對左投/右投各建立獨立的分類器，使用絕對位移搭配相對速度/轉速特徵：
-
-```python
-PITCH_FEATURES = [
-    'api_break_x_arm',          # 絕對水平位移（SL/FC/ST F-ratio 最高）
-    'api_break_z_with_gravity', # 絕對垂直位移
-    'spin_axis_sin',
-    'spin_axis_cos',
-    'rel_release_speed',        # 相對球速
-    'rel_release_spin_rate',    # 相對轉速
-    'ay',                       # 縱向加速度
-    'vy0',                      # 縱向初速
-]
-```
-
-QDA 相比 Naive Bayes 的優勢在於估計每個球種各自的完整 covariance matrix，可捕捉特徵之間的相關性，決策邊界為二次曲線，更有彈性。
-
-後驗機率公式：
-
-```
-g_i(x) = -1/2 * log|S_i| - 1/2 * (x-m_i)^T * S_i^{-1} * (x-m_i) + log P(C_i)
-P(C_i|x) ∝ exp(g_i(x))
-```
-
-**信心評估**
-
-```
-margin = P(top1|x) - P(top2|x)
-```
-
-margin 越小代表兩個候選球種的後驗機率越接近，模型越不確定。最佳 threshold（0.5）在驗證集上透過掃描選定，不接觸測試集。
-
-**BinaryLDA 第二層**
-
-針對物理特徵上天然相似的球種對，各自訓練專屬的二元分類器，使用相對特徵消除投手個體差異。只有當第一層不確定（margin < threshold）且前兩名預測正好是已知混淆對之一時才觸發，其餘維持第一層結果。
-
-| 混淆對 | J(w) | 觸發比例（測試集） | 說明 |
-|--------|------|------------------|------|
-| CH ↔ FS | 1.67 | — | 變速球 vs 分叉球，球速與位移接近 |
-| FC ↔ SL | 2.21 | — | 卡特球 vs 滑球，水平位移相近 |
-| SL ↔ ST | 1.91 | — | 滑球 vs 橫掃滑球，同屬滑球家族 |
-| CU ↔ ST | 2.77 | — | 曲球 vs 橫掃滑球 |
-
-第二層整體觸發比例：10.0%（1813 / 18148 筆）
-
-### 資料切割
-
-```
-60% 訓練集 → 訓練所有模型參數
-20% 驗證集 → 選 margin threshold、確認混淆對
-20% 測試集 → 只跑一次，作為最終報告數字
-```
-
-### 最終測試集結果
-
-| 球種 | 第一層 QDA | 第二層 LDA | 變化 |
-|------|-----------|-----------|------|
-| FF 四縫線速球 | 95.2% | 95.2% | — |
-| SI 伸卡球 | 90.3% | 90.3% | — |
-| CU 曲球 | 88.7% | 87.9% | ↓ -0.8% |
-| CH 變速球 | 88.4% | 83.6% | ↓ -4.7% |
-| ST 橫掃滑球 | 85.3% | 87.0% | ↑ +1.7% |
-| FC 卡特球 | 83.7% | 86.0% | ↑ +2.3% |
-| FS 分叉球 | 63.9% | 76.3% | ↑ +12.4% |
-| SL 滑球 | 62.1% | 59.9% | ↓ -2.1% |
-| **整體 Macro** | **82.2%** | **83.3%** | **+1.1%** |
-
-準確率計算方式：各球種準確率的算術平均（Macro Accuracy）。
+1. 用 bin=10° 的 histogram 找該（球種 × 手性）子群的眾數角度
+2. 平移使眾數落在 180°（遠離邊界）
+3. 在平移空間做標準 IQR（k=3）
+4. 從原始資料移除對應離群樣本（保留原始角度值）
 
 ---
 
-## 模型論述定位
+## 評估指標
 
-本專案的架構屬於「基於混淆結構的探索式階層分類器（Confusion-aware Exploratory Hierarchical Classifier）」，對應以下教材概念：
+**Macro Accuracy**：各球種準確率的算術平均。
 
-| 模組 | 教材對應 |
-|------|---------|
-| QDA | L6 Multivariate Methods — Quadratic Discriminant |
-| BinaryLDA | L10 Linear Discrimination — Fisher's LDA |
-| margin 信心門檻 | L4 Bayesian Decision Theory — Reject/Doubt 機制 |
-| 左右投分類 | L10 Linear Discrimination — Binary Classification |
+$$\text{Macro Accuracy} = \frac{1}{K} \sum_{k=1}^{K} \frac{\text{正確預測的第 } k \text{ 類樣本數}}{\text{第 } k \text{ 類的總樣本數}}$$
 
-注意：Statcast 的球種標籤本身由自動化系統產生，並非百分之百準確。部分「錯誤」預測可能反映的是標籤本身的不確定性，而非模型缺陷。
+### 效能（測試集 Macro 78.8%）
+
+| 球種 | 準確率 | 備註 |
+|------|-------|------|
+| FF | 94.1% | |
+| SI | 84.5% | |
+| FC | 72.2% | 與 SL 互相混淆 |
+| SL | 63.4% | 與 FC/ST 互相混淆 |
+| ST | 87.3% | |
+| CU | 88.8% | |
+| CH | 91.0% | |
+| FS | 49.1% | 與 CH 物理高度相似，物理上限問題 |
+
+### 已知限制
+
+- **FC/SL 混淆**：卡特球和滑球在水平位移和球速維度上有重疊區間，屬於棒球界公認的分類難題。
+- **CH/FS 混淆**：變速球和分叉球的飛行物理幾乎相同，差異主要在握球方式（Statcast 無法量測），74% 的準確率反映物理上限。
+- **左投 Offspeed**：左投 FS 在訓練集僅約 2 筆，無法建模，直接輸出 CH。
 
 ---
 
-## 注意事項
+## 資料切分
 
-- 所有模型均為手刻實作（numpy），不依賴 sklearn
-- Step 2 的輸入必須是**無鏡像版** `testdata_only_phy.csv`，不能用 mirror 版
-- `spin_axis_sin/cos` 的轉換在 Step 2 完成，分類器不重複做
-- LDA 左右投的特徵集（`LDA_FEATURES`）和 QDA 球種分類的特徵集（`PITCH_FEATURES`）是兩組不同的特徵，不要混用
-- 第二層只在「前兩名預測正好是預設混淆對之一」時才觸發
+全資料一次切分（seed=42）：
 
+| 集合 | 比例 | 用途 |
+|------|------|------|
+| 訓練集 | 60% | 訓練所有 QDA 模型、計算 z-score 參數 |
+| 驗證集 | 20% | Forward Selection 的 elbow 判斷 |
+| 測試集 | 20% | 最終評估（僅跑一次） |
+
+---
+
+## 檔案結構
+
+| 檔案 | 用途 |
+|------|------|
+| `step1_eda.py` | EDA：球種統計、特徵分布、spin_axis 邊界分析 |
+| `step2_preprocess.py` | 前處理：清理、IQR、sin/cos 轉換、抽樣 → 輸出 `testdata_only_phy.csv` |
+| `step3_feature_selection.py` | 特徵選擇：相關係數篩選、F-ratio 排序 |
+| `step4_forward_selection.py` | Forward Selection：找各層 / 各大類的 TOP_N |
+| `step5_pipeline.py` | 完整 pipeline 端對端評估（驗證集 + 測試集） |
+| `train_and_save.py` | 訓練模型並存成 `model.pkl` |
+| `predict.py` | 單筆預測介面（terminal 互動 / import 使用） |
+
+---
+
+## 使用方式
+
+### 1. 前處理 → 訓練 → 預測
+
+```bash
+python step2_preprocess.py      # 產出 testdata_only_phy.csv
+python train_and_save.py        # 產出 model.pkl
+python predict.py               # Terminal 互動預測
+```
+
+### 2. 從其他程式呼叫
+
+```python
+import predict
+predict.ensure_model_loaded()
+
+result = predict.predict_pitch({
+    'p_throws': 'R',
+    'release_speed': 92.0,
+    'release_spin_rate': 2300.0,
+    'spin_axis': 210.0,
+    'pfx_x': -5.2,
+    'api_break_z_with_gravity': 30.5,
+    'vx0': 8.4,
+    'vz0': -3.4,
+    'ay': 26.8,
+})
+
+print(result['predicted_pitch'])  # e.g. 'SL'
+print(result['margin'])           # Layer 1 信心分數
+```
+
+### 輸出格式
+
+```python
+{
+    'predicted_pitch': 'SL',     # 預測球種代碼
+    'margin':          0.8523,   # Layer 1 後驗機率差（top1 - top2）
+    'hand':            'R',      # 投手慣用手
+    'layer2':          False,    # 保留欄位（新架構不使用）
+    'top2_candidate':  '',       # 保留欄位（新架構不使用）
+}
+```
 ---
 
 ## ⚾ 球種素質評估模組（Stuff+ PR 評分系統）
