@@ -1,7 +1,3 @@
-# 棒球球種分類器（Baseball Pitch Type Classifier）
-
-利用 MLB Statcast 投球物理數據，透過階層式分類架構（QDA + BinaryLDA）對球種進行自動分類。
-
 # MLB 投球球種分類器 — 架構與使用說明
 
 ## 概述
