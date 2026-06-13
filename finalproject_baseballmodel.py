@@ -69,79 +69,79 @@ PITCH_CONFIG = {
         'pfx_x_abs':         {'weight': 0.0, 'ascending': True}
     }
 }
-
-# 第一階段：資料讀取與預處理
-print("1. 正在讀取並篩選資料...")
-df_raw = pd.read_csv('statcast_bat_tracking_2024_2025.csv')
-target_pitches = list(PITCH_CONFIG.keys()) # 直接從矩陣抓球種名稱！
-
-core_columns = [
-    'pitch_type', 'release_speed', 'release_spin_rate', 
-    'pfx_x', 'pfx_z','spin_axis','release_pos_x', 'release_pos_z', 
-    'plate_x', 'plate_z'
-]
-
-df_clean = df_raw[df_raw['pitch_type'].isin(target_pitches)][core_columns].dropna().copy()
-df_clean['pfx_x_abs'] = df_clean['pfx_x'].abs()
-print(f"篩選與清理完成，共剩下 {len(df_clean)} 筆有效資料。\n")
-
-# 第二階段：特徵工程 - 動態計算球種 PR 值
-print("2. 正在計算各球種 PR 值 (Stuff+ Score)...")
-
-def calculate_pitch_pr(df, config_matrix):
-    df['pitch_quality_score'] = 0.0
-    pitch_types = df['pitch_type'].unique()
+if __name__ == '__main__':
+    # 第一階段：資料讀取與預處理
+    print("1. 正在讀取並篩選資料...")
+    df_raw = pd.read_csv('statcast_bat_tracking_2024_2025.csv')
+    target_pitches = list(PITCH_CONFIG.keys()) # 直接從矩陣抓球種名稱！
     
-    for p_type in pitch_types:
-        if p_type not in config_matrix:
-            continue # 如果資料庫有未知球種，直接跳過
-            
-        mask = df['pitch_type'] == p_type
-        score = 0.0
+    core_columns = [
+        'pitch_type', 'release_speed', 'release_spin_rate', 
+        'pfx_x', 'pfx_z','spin_axis','release_pos_x', 'release_pos_z', 
+        'plate_x', 'plate_z'
+    ]
+    
+    df_clean = df_raw[df_raw['pitch_type'].isin(target_pitches)][core_columns].dropna().copy()
+    df_clean['pfx_x_abs'] = df_clean['pfx_x'].abs()
+    print(f"篩選與清理完成，共剩下 {len(df_clean)} 筆有效資料。\n")
+    
+    # 第二階段：特徵工程 - 動態計算球種 PR 值
+    print("2. 正在計算各球種 PR 值 (Stuff+ Score)...")
+    
+    def calculate_pitch_pr(df, config_matrix):
+        df['pitch_quality_score'] = 0.0
+        pitch_types = df['pitch_type'].unique()
         
-        # 動態讀取矩陣中的設定來計算
-        for feature, settings in config_matrix[p_type].items():
-            if settings['weight'] > 0: # 權重為 0 的就不浪費時間算
-                # 計算 PR 值，並直接套用 ascending 規則
-                pr = df.loc[mask, feature].rank(pct=True, ascending=settings['ascending'])
-                score += pr * settings['weight']
+        for p_type in pitch_types:
+            if p_type not in config_matrix:
+                continue # 如果資料庫有未知球種，直接跳過
                 
-        df.loc[mask, 'pitch_quality_score'] = score * 100
-
-    return df
-
-df_scored = calculate_pitch_pr(df_clean, PITCH_CONFIG)
-print("計算完成！\n")
-
-# 特徵的最大最小區間
-# 1. 指定你想檢查的特徵欄位
-features_to_check = ['release_speed', 'release_spin_rate', 'pfx_z', 'pfx_x_abs']
-
-# 2. 依照球種分組，並計算這些特徵的 max(最大值) 和 min(最小值)
-# 這裡加一個 'mean' (平均值) 當作對照會更有感覺！
-pitch_stats = df_clean.groupby('pitch_type')[features_to_check].agg(['max', 'min', 'mean'])
-
-# 3. 為了讓終端機印出來比較漂亮，我們把小數點四捨五入到第 2 位
-pitch_stats = pitch_stats.round(2)
-
-print(pitch_stats)
-# 第三階段：視覺化與資料匯出
-print("3. 繪製圖表並匯出資料給隊友...")
-avg_scores = df_scored.groupby('pitch_type')['pitch_quality_score'].mean()
-print("各球種平均 PR 值 (理想應接近 50):")
-print(avg_scores)
-
-plt.figure(figsize=(8, 5))
-fastballs = df_scored[df_scored['pitch_type'] == 'FF']
-fastballs['pitch_quality_score'].hist(bins=30, edgecolor='black', color='skyblue')
-plt.title('Distribution of FF (Four-Seam Fastball) PR Scores')
-plt.xlabel('PR Score (0-100)')
-plt.ylabel('Frequency')
-plt.grid(False)
-plt.show()
-
-df_scored.to_csv('ml_ready_pitch_data.csv', index=False)
-print("檔案已儲存為 'ml_ready_pitch_data.csv'！\n")
+            mask = df['pitch_type'] == p_type
+            score = 0.0
+            
+            # 動態讀取矩陣中的設定來計算
+            for feature, settings in config_matrix[p_type].items():
+                if settings['weight'] > 0: # 權重為 0 的就不浪費時間算
+                    # 計算 PR 值，並直接套用 ascending 規則
+                    pr = df.loc[mask, feature].rank(pct=True, ascending=settings['ascending'])
+                    score += pr * settings['weight']
+                    
+            df.loc[mask, 'pitch_quality_score'] = score * 100
+    
+        return df
+    
+    df_scored = calculate_pitch_pr(df_clean, PITCH_CONFIG)
+    print("計算完成！\n")
+    
+    # 特徵的最大最小區間
+    # 1. 指定你想檢查的特徵欄位
+    features_to_check = ['release_speed', 'release_spin_rate', 'pfx_z', 'pfx_x_abs']
+    
+    # 2. 依照球種分組，並計算這些特徵的 max(最大值) 和 min(最小值)
+    # 這裡加一個 'mean' (平均值) 當作對照會更有感覺！
+    pitch_stats = df_clean.groupby('pitch_type')[features_to_check].agg(['max', 'min', 'mean'])
+    
+    # 3. 為了讓終端機印出來比較漂亮，我們把小數點四捨五入到第 2 位
+    pitch_stats = pitch_stats.round(2)
+    
+    print(pitch_stats)
+    # 第三階段：視覺化與資料匯出
+    print("3. 繪製圖表並匯出資料給隊友...")
+    avg_scores = df_scored.groupby('pitch_type')['pitch_quality_score'].mean()
+    print("各球種平均 PR 值 (理想應接近 50):")
+    print(avg_scores)
+    
+    plt.figure(figsize=(8, 5))
+    fastballs = df_scored[df_scored['pitch_type'] == 'FF']
+    fastballs['pitch_quality_score'].hist(bins=30, edgecolor='black', color='skyblue')
+    plt.title('Distribution of FF (Four-Seam Fastball) PR Scores')
+    plt.xlabel('PR Score (0-100)')
+    plt.ylabel('Frequency')
+    plt.grid(False)
+    plt.show()
+    
+    df_scored.to_csv('ml_ready_pitch_data.csv', index=False)
+    print("檔案已儲存為 'ml_ready_pitch_data.csv'！\n")
 
 # 第四階段：單顆新球評估 (動態讀取矩陣)
 def evaluate_new_pitch(new_pitch, baseline_df, config_matrix):
@@ -171,36 +171,61 @@ def evaluate_new_pitch(new_pitch, baseline_df, config_matrix):
 
     return round(score * 100, 2)
 
-
-#%% 互動式輸入數據
-while True:
-    print("\n" + "="*40)
-    print("請輸入新球的數據 (輸入 'q' 可以離開程式)：")
+#%%
+if __name__ == '__main__':
+    # 1. 先選出你想看的球種 (例如 'FF')
+    target_pitch = 'FF'
+    df_target = df_scored[df_scored['pitch_type'] == target_pitch]
     
-    p_type = input("球種 (例如 FF, ST, FS, SI): ").upper()
-    if p_type == 'Q':
-        print("系統關閉")
-        break
+    # 2. 依照 PR 分數「由高到低」排序，抓出第 1 名 (最強魔鬼球)
+    best_pitch = df_target.sort_values(by='pitch_quality_score', ascending=False).iloc[0]
+    
+    # 3. 依照 PR 分數「由低到高」排序，抓出倒數第 1 名 (最慘失投球)
+    worst_pitch = df_target.sort_values(by='pitch_quality_score', ascending=True).iloc[0]
+    
+    # 4. 印出結果，格式幫你整理好，可以直接複製去測試！
+    print(f"=== 🏆 歷史最強 {target_pitch} (PR: {best_pitch['pitch_quality_score']:.2f}) ===")
+    print(f"球速 (mph): {best_pitch['release_speed']}")
+    print(f"轉速 (rpm): {best_pitch['release_spin_rate']}")
+    print(f"縱向位移 (英吋): {best_pitch['pfx_z']}")
+    print(f"橫向位移 (英吋): {best_pitch['pfx_x']}")
+    print("-" * 40)
+    
+    print(f"=== 💀 歷史最弱 {target_pitch} (PR: {worst_pitch['pitch_quality_score']:.2f}) ===")
+    print(f"球速 (mph): {worst_pitch['release_speed']}")
+    print(f"轉速 (rpm): {worst_pitch['release_spin_rate']}")
+    print(f"縱向位移 (英吋): {worst_pitch['pfx_z']}")
+    print(f"橫向位移 (英吋): {worst_pitch['pfx_x']}")
+#%% 互動式輸入數據
+if __name__ == '__main__':
+    while True:
+        print("\n" + "="*40)
+        print("請輸入新球的數據 (輸入 'q' 可以離開程式)：")
         
-    try:
-        speed = float(input("球速 (mph): "))
-        spin = float(input("轉速 (rpm): "))  
-        pfx_z = float(input("縱向位移 (英呎): "))
-        pfx_x = float(input("橫向位移 (英呎): "))
-    except ValueError:
-        print("格式錯誤！請輸入數字。")
-        continue
-        
-    user_pitch = {
-        'pitch_type': p_type,
-        'release_speed': speed,
-        'release_spin_rate': spin,
-        'pfx_x': pfx_x,
-        'pfx_z': pfx_z
-    }    
-    try:
-        # 注意這裡多傳了一個參數 PITCH_CONFIG 給函數
-        score = evaluate_new_pitch(user_pitch, df_clean, PITCH_CONFIG)
-        print(f"\n分析完成！你的 {p_type} 綜合 PR 評分為：【 {score} 分 】")
-    except Exception as e:
-        print(f"計算時發生錯誤: {e}")
+        p_type = input("球種 (例如 FF, ST, FS, SI): ").upper()
+        if p_type == 'Q':
+            print("系統關閉")
+            break
+            
+        try:
+            speed = float(input("球速 (mph): "))
+            spin = float(input("轉速 (rpm): "))  
+            pfx_z = float(input("縱向位移 (英吋): "))
+            pfx_x = float(input("橫向位移 (英吋): "))
+        except ValueError:
+            print("格式錯誤！請輸入數字。")
+            continue
+            
+        user_pitch = {
+            'pitch_type': p_type,
+            'release_speed': speed,
+            'release_spin_rate': spin,
+            'pfx_x': pfx_x,
+            'pfx_z': pfx_z
+        }    
+        try:
+            # 注意這裡多傳了一個參數 PITCH_CONFIG 給函數
+            score = evaluate_new_pitch(user_pitch, df_clean, PITCH_CONFIG)
+            print(f"\n分析完成！你的 {p_type} 綜合 PR 評分為：【 {score} 分 】")
+        except Exception as e:
+            print(f"計算時發生錯誤: {e}")
