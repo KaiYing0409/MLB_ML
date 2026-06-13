@@ -20,7 +20,8 @@ import numpy as np
 import pandas as pd
 
 DATA_PATH   = 'statcast_bat_tracking_2024_2025.csv'
-OUTPUT_PATH = 'testdata_only_phy.csv'
+OUTPUT_PATH_10W = 'testdata_only_phy.csv'
+OUTPUT_PATH_COACH = 'Pitch_physical_only.csv' # 這就是給 AI 教練用的
 N_SAMPLE    = 100_000
 K           = 3.0
 BIN_DEG     = 10
@@ -167,6 +168,9 @@ df['spin_axis_sin'] = np.sin(np.deg2rad(df['spin_axis']))
 df['spin_axis_cos'] = np.cos(np.deg2rad(df['spin_axis']))
 print(f"spin_axis sin/cos 轉換完成")
 
+COACH_DB_PATH = 'Pitch_physical_only.csv'
+df.to_csv(COACH_DB_PATH, index=False)
+print(f"\n已儲存 AI 教練專用大母體資料庫：{COACH_DB_PATH} (共 {len(df):,} 筆)")
 # ============================================================
 # STEP 7：分層抽樣 10 萬筆
 # ============================================================
@@ -184,5 +188,10 @@ print(df_sample['pitch_type'].value_counts().to_string())
 # ============================================================
 # STEP 8：輸出
 # ============================================================
-df_sample.to_csv(OUTPUT_PATH, index=False)
-print(f"\n已儲存：{OUTPUT_PATH}")
+# 1. 先輸出 AI 教練專用的大母體資料庫 (138 萬筆乾淨版)
+df.to_csv(OUTPUT_PATH_COACH, index=False)
+print(f"\n✅ 已儲存 AI 教練專用大母體資料庫：{OUTPUT_PATH_COACH} (共 {len(df):,} 筆)")
+
+# 2. 再輸出分類器模型訓練用的分層抽樣資料庫 (10 萬筆平衡版)
+df_sample.to_csv(OUTPUT_PATH_10W, index=False)
+print(f"✅ 已儲存分類器專用抽樣資料庫：{OUTPUT_PATH_10W} (共 {len(df_sample):,} 筆)")
