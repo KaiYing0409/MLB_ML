@@ -1,15 +1,16 @@
 import pandas as pd
 import numpy as np
+# 載入球種預測模型
 import predict
-# 載入球種預測模型 
 from predict import predict_pitch
+
 from pathlib import Path
 from scipy import stats
 # 載入品質分析模型 
 from finalproject_baseballmodel import evaluate_new_pitch, PITCH_CONFIG
 # ==========================================
-predict.ensure_model_loaded()
-print('MODEL_AVAILABLE =', predict.MODEL_AVAILABLE)
+# predict.ensure_model_loaded()
+# print('MODEL_AVAILABLE =', predict.MODEL_AVAILABLE)
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_PATH = BASE_DIR / "Pitch_physical_only.csv"
@@ -144,7 +145,7 @@ def run_phase2_analysis(pool_df, optimization_features=None):
 def evaluate_pitch_confidence(current_pitch, target_mean, target_covariance, optimization_features=None):
     """
     Phase 3：計算馬哈拉諾比斯距離，並轉換為 0~100% 的落點信心度
-    """
+    """  
     if optimization_features is None:
         optimization_features = ['release_speed', 'release_spin_rate', 'spin_axis']
 
@@ -160,78 +161,120 @@ def evaluate_pitch_confidence(current_pitch, target_mean, target_covariance, opt
     # 4. 馬氏距離公式： D = sqrt( delta^T * cov_inv * delta )
     distance_squared = np.dot(np.dot(delta_vector, cov_inv), delta_vector)
     mahalanobis_dist = np.sqrt(max(0, distance_squared)) # max(0) 是保護機制，避免浮點數微小負值
-    
+    ''' 
     # 5. 轉換為 0~100 的信心度 (使用常態分佈衰減曲線)
     # -0.5 是一個常數，如果你覺得系統給分太嚴格，可以改成 -0.2；覺得太鬆可以改成 -1.0
     confidence_score = np.exp(-0.5 * (mahalanobis_dist ** 2)) * 100
+    ''' 
+    # 5. 轉換為 0~100 的信心度 (切換回卡方分布版本)(分數會較不嚴厲，因常態分布衰減很快)
+    from scipy.stats import chi2
+    # distance_squared 就是馬氏距離的平方 (D^2)
+    # df 是自由度，因為你們用了三個特徵 ['release_speed', 'release_spin_rate', 'spin_axis']，所以 df=3
+    confidence_score = (1 - chi2.cdf(distance_squared, df=len(optimization_features))) * 100
+    
     
     # 6. 把誤差打包成字典，準備交給 Phase 4 
     deltas_dict = {feat: diff for feat, diff in zip(optimization_features, delta_vector)}
     
     return confidence_score, mahalanobis_dist, deltas_dict
 
-def gradient_descent_coach(current_pitch, target_mean, target_cov, features, target_confidence=85.0):
+from scipy.stats import chi2
+
+def gradient_descent_coach(current_pitch, target_mean, target_cov, features):
     """
-    加權梯度下降法：尋找阻力最小的投球修正路徑
+    version2：懲罰項最佳化 (Penalized Optimization) + 生理容忍度極限對齊
+    不追求死板的目標信心度(ex:85%)，而是尋找『信心度』與『調整痛苦程度』的最佳平衡點。
     """
     missing = [feat for feat in features if feat not in current_pitch]
     if missing:
         raise ValueError(f"current_pitch 缺少必要欄位: {missing}")
 
     original_x = np.array([float(current_pitch[feat]) for feat in features], dtype=float)
-
-    # 2. 定義人體工學難度 (Mobility Weights) 註:這邊定義多一點特徵的修正權重，但實際上只會用到前三個，如果後續要添加就不用再額外設定權重
-    mobility_weights = {
-        'release_speed': 0.1,
-        'release_spin_rate': 0.2,
-        'spin_axis': 0.5,
-        'vx0': 1.0,
-        'vz0': 1.0,
-        'release_pos_x': 0.5,
-        'release_pos_z': 0.5,
-        'release_extension': 0.6,
-        'pfx_x': 0.8,
-        'pfx_z': 0.8,
+    
+    # 1. 定義「人體容忍度」(以真實物理單位衡量！)
+    # 該投手在安全發力下，短期內最多能改變多少物理量。
+    physical_tolerances = {
+        'release_speed': 1.5,       # 最多調整 1.5 mph
+        'release_spin_rate': 150.0, # 最多調整 150 rpm
+        'spin_axis': 15.0           # 最多調整 15 度
     }
-    weights = np.array([mobility_weights.get(feat, 1.0) for feat in features], dtype=float)
+    
+    # 將容忍度轉成陣列 (若未來有新特徵，預設給一個極大的容忍度 1e6 避免報錯)
+    tolerances_array = np.array([physical_tolerances.get(feat, 1e6) for feat in features], dtype=float)
 
-    learning_rate = 0.02
-    max_iterations = 100
-    current_conf = 0.0
-
-    # 標準化變數，避免不同單位導致數值不穩定
-    diag_std = np.sqrt(np.abs(np.diag(target_cov))) 
-    #np.diag(target_cov)抓出主對角線元素，即變異數sigma^2，再透過外層的np.sqrt開根號得到標準差sigma。
+    # 取得黃金基準池的標準差 (sigma)
+    diag_std = np.sqrt(np.abs(np.diag(target_cov)))
     diag_std[diag_std == 0] = 1e-8
+    
+    # 2. 【終極解法】：動態計算懲罰權重 (量綱對齊)
+    # 權重 = (統計標準差 / 人體容忍度) ^ 2
+    # 物理意義：算出的懲罰成本將完美等價於「消耗了多少 % 的人體容忍度」
+    weights = np.square(diag_std / tolerances_array)
+
+    # 初始化設定
+    learning_rate = 0.05
+    max_iterations = 150
+    
+    # 標準化數據 (為了讓梯度下降穩定)
     x_scaled = (original_x - target_mean) / diag_std
-    cov_scaled = target_cov / (diag_std[:, None] * diag_std[None, :]) #把共變異數矩陣除以標準差乘積矩陣，得到相關係數矩陣
+    cov_scaled = target_cov / (diag_std[:, None] * diag_std[None, :])
     cov_scaled_inv = np.linalg.pinv(cov_scaled)
+    
+    # 記住投手的原始起點 (標準化空間)
+    x_org_scaled = x_scaled.copy()
+    
+    # 教練的保守程度(penalty越高調整造成的loss越高，i.e.只能微調)
+    # 我們已經用物理容忍度正規化了權重，這裡的 strength 可以設小一點
+    # 建議範圍：1.0 (積極修正) ~ 5.0 (保守微調)
+    penalty_strength = 3.0
+    
+    min_total_loss = float('inf')
+    best_x_scaled = x_scaled.copy()
 
     # 3. 開始數值疊代 (Gradient Descent Loop)
     for i in range(max_iterations):
-        delta = x_scaled #標準化後的數據靶心為0，誤差向量就是當前點的位置
-        dist_sq = np.dot(np.dot(delta, cov_scaled_inv), delta) #算現在的馬氏距離平方
-        current_conf = np.exp(-0.5 * dist_sq) * 100 #轉換為信心度
+        # A. 計算精準度誤差：當前位置在馬氏空間與靶心的距離平方 (越小越好)
+        dist_sq = np.dot(np.dot(x_scaled, cov_scaled_inv), x_scaled)
+        
+        # B. 計算調整痛苦成本：當前位置偏離原始起點的距離
+        scaled_adjustments = x_scaled - x_org_scaled
+        adjustment_cost = np.sum(weights * np.square(scaled_adjustments))
+        
+        # C. 損失函數loss：誤差總分 = 控球誤差 + (調整痛苦代價 * 教練保守度)
+        total_loss = dist_sq + (adjustment_cost * penalty_strength)
 
-        if current_conf >= target_confidence:
-            break
+        # 記錄歷史上「自平衡最完美」的那一步
+        if total_loss < min_total_loss:
+            min_total_loss = total_loss
+            best_x_scaled = x_scaled.copy()
 
-        gradient = 2 * np.dot(cov_scaled_inv, delta) #梯度是 2 * cov^-1 * delta，這是馬氏距離平方對 x 的導數
-        step = learning_rate * (weights * gradient) #加權梯度，讓人體工學難度高的特徵移動更小
-        step = np.clip(step, -1.0, 1.0) #限制每次更新的幅度，避免過大導致不穩定
+        # D. 梯度計算 (兩股力量平衡)
+        # 力量一：把球推向完美靶心的引力
+        gradient = 2 * np.dot(cov_scaled_inv, x_scaled)
+        # 力量二：把球拉回投手原本肌肉記憶的彈簧拉力
+        penalty_gradient = 2 * weights * scaled_adjustments * penalty_strength
+        
+        # 綜合兩股力量，更新下一步的位置
+        step = learning_rate * (gradient + penalty_gradient)
+        step = np.clip(step, -0.5, 0.5) # 縮小步伐，讓收斂更平滑
         x_scaled = x_scaled - step
 
-    x_opt = x_scaled * diag_std + target_mean #把優化後的標準化數據轉回原始尺度
-    optimal_adjustments = x_opt - original_x #計算每個特徵的修正量
+    # 4. 疊代結束：轉回原始尺度並計算最終結果
+    x_opt = best_x_scaled * diag_std + target_mean
+    optimal_adjustments = x_opt - original_x
+    
+    # 計算最終信心度 (統一使用卡方分佈)
+    final_dist_sq = np.dot(np.dot(best_x_scaled, cov_scaled_inv), best_x_scaled)
+    final_conf = (1 - chi2.cdf(final_dist_sq, df=len(features))) * 100
+    
     advice_dict = {feat: adj for feat, adj in zip(features, optimal_adjustments)}
 
-    return advice_dict, current_conf
-
+    return advice_dict, final_conf
 
 def run_hybrid_ai_system(raw_pitch_data: dict, target_zone: int, pitcher_profile: dict, df_database):
     """
     棒球分析系統 Pipeline
-    輸入：一顆球的原始數據 -> 輸出：球種辨識結果 + 控球評分 + 建議方向
+    輸入：一顆球的原始數據 -> 輸出：球種辨識結果 + 控球評分 + 信心度及建議方向
     """
     print("\n" + "=" * 50)
     print("開始解析...")
@@ -299,7 +342,7 @@ def run_hybrid_ai_system(raw_pitch_data: dict, target_zone: int, pitcher_profile
             target_mean=target_mean,
             target_cov=target_cov,
             features=opt_features,
-            target_confidence=85.0
+            
         )
 
         print("教練建議修正量：")
@@ -325,42 +368,61 @@ def run_hybrid_ai_system(raw_pitch_data: dict, target_zone: int, pitcher_profile
 # ==========================================
 # 測試區 
 # ==========================================
-my_pitcher = {
-    'release_pos_x': -2.1,
-    'release_pos_z': 5.5,
-    'release_extension': 6.5
-}
-
-try:
-    # 串接函式測試：
-    raw_pitch_input = {
-        'release_speed': 92.0,
-        'release_spin_rate': 1520.0,
-        'spin_axis': 238.0,
-        'api_break_x_arm': -4.2,
-        'api_break_z_with_gravity': 30.5,
-        'pfx_x': -2.3,
-        'pfx_z': 1.5,
-        'ax': -6.8,
-        'vx0': 8.4,
-        'vz0': -3.4,
-        'ay': 26.8,
-        'vy0': -135.5,
-        'arm_angle': 28.0,
-        'p_throws': 'R',
-        'release_pos_x': -2.12,
-        'release_pos_z': 5.54,
-        'release_extension': 6.5
+if __name__ == '__main__':
+    my_pitcher = {
+        'release_pos_x':2.83,
+        'release_pos_z': 5.98,
+        'release_extension': 6.9
     }
+    
+    try:
+        # 串接函式測試：
+        ''' (FF)
+        raw_pitch_input = {
+            'release_speed': 92.0,
+            'release_spin_rate': 1520.0,
+            'spin_axis': 238.0,
+            'api_break_x_arm': -4.2,
+            'api_break_z_with_gravity': 30.5,
+            'pfx_x': -2.3,
+            'pfx_z': 1.5,
+            'ax': -6.8,
+            'vx0': 8.4,
+            'vz0': -3.4,
+            'ay': 26.8,
+            'vy0': -135.5,
+            'arm_angle': 28.0,
+            'p_throws': 'R',
+            'release_pos_x': -2.12,
+            'release_pos_z': 5.54,
+            'release_extension': 6.5
+        '''
+        # (FF)
+        raw_pitch_input = {
+            'release_speed': 97.7,       
+            'release_spin_rate': 2577.0,
+            'spin_axis': 140,           
+            'pfx_x': 0.79,
+            'pfx_z': 1.06,
+            'api_break_x_arm': 0.79,
+            'api_break_z_with_gravity': 1.34,
+            'ax': 12.6094, 'vx0': -8.16783, 'vz0': -6.40157,
+            'ay': 33.636, 'vy0': -141.948, 'az': -16.4659,
+            'arm_angle': 33.9, 'p_throws': 'L',
+            'release_pos_x': 2.83, 'release_pos_z': 5.98, 'release_extension': 6.9
+        
+        
+        }
+    
+        result = run_hybrid_ai_system(
+            raw_pitch_data=raw_pitch_input,
+            target_zone=9,
+            pitcher_profile=my_pitcher,
+            df_database=df_clean
+        )
+    
+        print("\n===run_hybrid_ai_system 測試結果 ===")
+        print(result)
+    except Exception as e:
+        print("測試過濾器時發生錯誤：", e)
 
-    result = run_hybrid_ai_system(
-        raw_pitch_data=raw_pitch_input,
-        target_zone=9,
-        pitcher_profile=my_pitcher,
-        df_database=df_clean
-    )
-
-    print("\n=== 新串接函式 run_hybrid_ai_system 測試結果 ===")
-    print(result)
-except Exception as e:
-    print("測試過濾器時發生錯誤：", e)
