@@ -1,192 +1,163 @@
 # -*- coding: utf-8 -*-
 """
-Created on Sun May 10 01:12:50 2026
-
-@author: user
+⚾ AI 棒球虛擬教練 - MLB-Grade Streamlit Dashboard
 """
-
-# -*- coding: utf-8 -*-
-import pandas as pd
-import numpy as np
 import streamlit as st
-from scipy import stats
-import matplotlib.pyplot as plt
+import pandas as pd
+import altair as alt
+from final_v1 import run_hybrid_ai_system, df_clean
 
 # ==========================================
-# 0. 網頁頁面基本設定
+# 0. 網頁基本設定 (使用寬版與暗色主題感)
 # ==========================================
-st.set_page_config(
-    page_title="王牌投手：Pitch Quality 評估系統",
-    page_icon="⚾",
-    layout="wide"
-)
+st.set_page_config(page_title="AI 棒球教練系統", page_icon="⚾", layout="wide", initial_sidebar_state="collapsed")
 
-# 1. 核心設定區：球種權重與邏輯矩陣 (PITCH_CONFIG)
+# 標題與簡介
+st.title("⚾ 混合式 AI 棒球投球優化系統")
+st.markdown("**National Tsing Hua University (NTHU) ESS - 運動科學專題** | *Powered by Gradient Descent & Mahalanobis Distance*")
+st.markdown("---")
 
-PITCH_CONFIG = {
-    'FF': { # 四縫線速球
-        'release_speed':     {'weight': 0.4, 'ascending': True},
-        'release_spin_rate': {'weight': 0.2, 'ascending': True},
-        'pfx_z':             {'weight': 0.4, 'ascending': True},
-        'pfx_x_abs':         {'weight': 0.0, 'ascending': True}
-    },
-    'SI': { # 伸卡球
-        'release_speed':     {'weight': 0.3, 'ascending': True},
-        'release_spin_rate': {'weight': 0.0, 'ascending': True},
-        'pfx_z':             {'weight': 0.3, 'ascending': False},
-        'pfx_x_abs':         {'weight': 0.4, 'ascending': True}
-    },
-    'FC': { # 卡特球
-        'release_speed':     {'weight': 0.4, 'ascending': True},
-        'release_spin_rate': {'weight': 0.2, 'ascending': True},
-        'pfx_z':             {'weight': 0.1, 'ascending': True},
-        'pfx_x_abs':         {'weight': 0.3, 'ascending': True}
-    },
-    'SL': { # 滑球
-        'release_speed':     {'weight': 0.2, 'ascending': True},
-        'release_spin_rate': {'weight': 0.3, 'ascending': True},
-        'pfx_z':             {'weight': 0.1, 'ascending': False},
-        'pfx_x_abs':         {'weight': 0.4, 'ascending': True}
-    },
-    'ST': { # 橫掃球
-        'release_speed':     {'weight': 0.1, 'ascending': True},
-        'release_spin_rate': {'weight': 0.3, 'ascending': True},
-        'pfx_z':             {'weight': 0.0, 'ascending': True},
-        'pfx_x_abs':         {'weight': 0.6, 'ascending': True}
-    },
-    'CU': { # 曲球
-        'release_speed':     {'weight': 0.1, 'ascending': True},
-        'release_spin_rate': {'weight': 0.4, 'ascending': True},
-        'pfx_z':             {'weight': 0.5, 'ascending': False},
-        'pfx_x_abs':         {'weight': 0.0, 'ascending': True}
-    },
-    'CH': { # 變速球
-        'release_speed':     {'weight': 0.1, 'ascending': False},
-        'release_spin_rate': {'weight': 0.1, 'ascending': False},
-        'pfx_z':             {'weight': 0.4, 'ascending': False},
-        'pfx_x_abs':         {'weight': 0.4, 'ascending': True}
-    },
-    'FS': { # 指叉球
-        'release_speed':     {'weight': 0.2, 'ascending': True},
-        'release_spin_rate': {'weight': 0.3, 'ascending': False},
-        'pfx_z':             {'weight': 0.5, 'ascending': False},
-        'pfx_x_abs':         {'weight': 0.0, 'ascending': True}
-    }
-}
+# ==========================================
+# 1. 建立分頁 (Tabs) 讓結構更清晰
+# ==========================================
+tab_dashboard, tab_history, tab_theory = st.tabs(["🎯 實戰模擬診斷儀表板", "📊 盲測驗證數據庫", "🔬 演算法原理解析"])
 
-# 2. 數據載入與快取 (處理 139 萬筆資料)
-@st.cache_data
-def load_and_prep_data():
-    # 注意：請確保 CSV 檔案與此程式碼放在同一個資料夾，或是使用絕對路徑
-    file_path = 'statcast_bat_tracking_2024_2025.csv'
-    try:
-        df_raw = pd.read_csv(file_path)
-    except FileNotFoundError:
-        # 如果找不到，嘗試使用你之前的絕對路徑 (請根據你的電腦修改)
-        alt_path = r'C:\Users\user\Desktop\COLLEGE\大三後\機器學習2026\ML2026\期末project\data\statcast_bat_tracking_2024_2025.csv'
-        df_raw = pd.read_csv(alt_path)
+with tab_dashboard:
+    # 建立左右雙欄 (左邊輸入 30%，右邊儀表板 70%)
+    col_input, col_dashboard = st.columns([3, 7])
+    
+    # ------------------------------------------
+    # 左側：專業數據輸入面板
+    # ------------------------------------------
+    with col_input:
+        st.markdown("### 📝 投球數據輸入 (Input)")
+        with st.form("pitch_input_form"):
+            st.markdown("##### 📍 戰術設定")
+            target_zone = st.selectbox("預期進壘位置 (Zone 1-9)", [1, 2, 3, 4, 5, 6, 7, 8, 9], index=8)
+            p_throws = st.selectbox("投手慣用手", ["R", "L"])
+            
+            st.markdown("##### ⚾ 核心軌跡特徵")
+            release_speed = st.number_input("球速 Speed (mph)", value=92.0, step=0.5)
+            release_spin_rate = st.number_input("轉速 Spin Rate (rpm)", value=1520.0, step=10.0)
+            spin_axis = st.number_input("轉軸 Spin Axis (°)", value=238.0, step=1.0)
+            pfx_x = st.number_input("橫向位移 HB (ft)", value=-2.3, step=0.1)
+            pfx_z = st.number_input("縱向位移 VB (ft)", value=1.5, step=0.1)
+            
+            with st.expander("🛠️ 進階生物力學與動力參數 (Auto-filled)"):
+                release_pos_x = st.number_input("出手點 X", value=-2.12)
+                release_pos_z = st.number_input("出手點 Z", value=5.54)
+                release_extension = st.number_input("延伸距離", value=6.5)
+                arm_angle = st.number_input("出手角度", value=28.0)
+                vx0 = st.number_input("初速 vx0", value=8.4)
+                vy0 = st.number_input("初速 vy0", value=-135.5)
+                vz0 = st.number_input("初速 vz0", value=-3.4)
+                ax = st.number_input("加速度 ax", value=-6.8)
+                ay = st.number_input("加速度 ay", value=26.8)
+                az = st.number_input("加速度 az", value=-25.0)
+                api_break_x_arm = st.number_input("api_break_x_arm", value=-4.2)
+                api_break_z_with_gravity = st.number_input("api_break_z", value=30.5)
+
+            submit_button = st.form_submit_button("🚀 執行 AI 優化診斷", use_container_width=True)
+
+    # ------------------------------------------
+    # 右側：高階數據儀表板
+    # ------------------------------------------
+    with col_dashboard:
+        if not submit_button:
+            # 尚未輸入時的佔位畫面
+            st.info("👈 請在左側輸入測速儀捕捉到的投球特徵，並點擊「執行 AI 優化診斷」。")
+            st.image("https://images.unsplash.com/photo-1508344928928-7105b67de451?q=80&w=1000&auto=format&fit=crop", caption="Awaiting Pitch Data...", use_container_width=True)
         
-    target_pitches = list(PITCH_CONFIG.keys())
-    core_columns = ['pitch_type', 'release_speed', 'release_spin_rate', 'pfx_x', 'pfx_z']
-    
-    df_clean = df_raw[df_raw['pitch_type'].isin(target_pitches)][core_columns].dropna().copy()
-    df_clean['pfx_x_abs'] = df_clean['pfx_x'].abs()
-    
-    # 事先計算好所有球的 PR (Stuff+ 分數)，這部分也會被快取
-    df_clean['pitch_quality_score'] = 0.0
-    for p_type in target_pitches:
-        mask = df_clean['pitch_type'] == p_type
-        score = 0.0
-        for feat, setts in PITCH_CONFIG[p_type].items():
-            if setts['weight'] > 0:
-                pr = df_clean.loc[mask, feat].rank(pct=True, ascending=setts['ascending'])
-                score += pr * setts['weight']
-        df_clean.loc[mask, 'pitch_quality_score'] = score * 100
-        
-    return df_clean
-
-# 載入資料
-with st.spinner('正在載入大聯盟實戰數據庫...'):
-    df_baseline = load_and_prep_data()
-
-
-# 3. 核心計算函數
-
-def evaluate_single_pitch(new_pitch, baseline_df, config_matrix):
-    p_type = new_pitch['pitch_type']
-    ref_data = baseline_df[baseline_df['pitch_type'] == p_type]
-    
-    new_pitch['pfx_x_abs'] = abs(new_pitch['pfx_x'])
-    score = 0.0 
-    
-    for feature, settings in config_matrix[p_type].items():
-        if settings['weight'] > 0:
-            raw_pr = stats.percentileofscore(ref_data[feature], new_pitch[feature], kind='weak')
-            final_pr = raw_pr if settings['ascending'] else (100.0 - raw_pr)
-            score += (final_pr / 100.0) * settings['weight']
-
-    return round(score * 100, 2)
-
-# 4. Streamlit UI 介面
-
-st.sidebar.header("📊 數據概況")
-st.sidebar.write(f"總樣本數：{len(df_baseline):,} 筆")
-st.sidebar.divider()
-st.sidebar.write("各球種平均 PR 值：")
-st.sidebar.dataframe(df_baseline.groupby('pitch_type')['pitch_quality_score'].mean().round(2))
-
-st.title("⚾ 王牌投手：球種 Stuff+ 評估 App")
-st.markdown("透過歷史實戰數據，評估你的投球在同球種中處於什麼樣的水平。")
-
-# --- 輸入區塊 ---
-with st.container():
-    p_type = st.selectbox("請選擇球種 (Pitch Type)", list(PITCH_CONFIG.keys()))
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        speed = st.number_input("球速 Release Speed (mph)", value=92.0, step=0.1)
-        spin = st.number_input("轉速 Spin Rate (rpm)", value=2200, step=10)
-    with col2:
-        pfx_x = st.number_input("橫向位移 Horizontal Break (ft)", value=0.0, step=0.01)
-        pfx_z = st.number_input("縱向位移 Vertical Break (ft)", value=1.0, step=0.01)
-
-# --- 執行與顯示 ---
-if st.button("🚀 開始評估這顆球", type="primary"):
-    user_pitch = {
-        'pitch_type': p_type,
-        'release_speed': speed,
-        'release_spin_rate': spin,
-        'pfx_x': pfx_x,
-        'pfx_z': pfx_z
-    }
-    
-    score = evaluate_single_pitch(user_pitch, df_baseline, PITCH_CONFIG)
-    
-    st.divider()
-    
-    # 顯示分數
-    c1, c2 = st.columns([1, 3])
-    with c1:
-        st.metric(label="綜合評分", value=f"{score} 分")
-    with c2:
-        if score >= 80:
-            st.balloons()
-            st.success("🔥 **極品等級！** 這顆球擁有大聯盟頂尖的素質，打者很難有效擊中。")
-        elif score >= 50:
-            st.info("👍 **優秀水平。** 這是一顆具有實戰價值的投球，具備一定的壓制力。")
         else:
-            st.warning("⚠️ **有待加強。** 這顆球的軌跡較平庸，容易被大聯盟打者鎖定進攻。")
+            # --- 後端運算開始 ---
+            raw_pitch_input = {
+                'release_speed': release_speed, 'release_spin_rate': release_spin_rate,
+                'spin_axis': spin_axis, 'pfx_x': pfx_x, 'pfx_z': pfx_z,
+                'release_pos_x': release_pos_x, 'release_pos_z': release_pos_z,
+                'release_extension': release_extension, 'arm_angle': arm_angle,
+                'p_throws': p_throws, 'vx0': vx0, 'vy0': vy0, 'vz0': vz0,
+                'ax': ax, 'ay': ay, 'az': az,
+                'api_break_x_arm': api_break_x_arm, 'api_break_z_with_gravity': api_break_z_with_gravity
+            }
+            my_pitcher = {'release_pos_x': release_pos_x, 'release_pos_z': release_pos_z, 'release_extension': release_extension}
+            
+            with st.spinner('🔬 正在計算多維度共變異數與梯度下降平衡點...'):
+                result = run_hybrid_ai_system(raw_pitch_input, target_zone, my_pitcher, df_clean)
+            
+            if result.get("status") == "success":
+                st.markdown("### 📊 AI 診斷分析報告 (Diagnostic Overview)")
+                
+                # --- Top Metrics (核心指標) ---
+                col_m1, col_m2, col_m3 = st.columns(3)
+                col_m1.metric("🤖 AI 辨識球種", result['pitch_type'])
+                col_m2.metric("🔥 Stuff+ PR (純物理球威)", f"{result.get('stuff_score', 0.0):.1f}")
+                col_m3.metric(f"📍 目標 Zone {target_zone} 信心度", f"{result.get('score', 0.0):.1f}%")
+                
+                st.markdown("---")
+                
+                # --- Middle Section (圖表與處方) ---
+                col_chart, col_advice = st.columns([4, 6])
+                
+                with col_chart:
+                    st.markdown("##### ⚾ 球路位移特徵 (Movement Profile)")
+                    # 畫一張專業的位移分佈圖 (X: 橫向位移, Y: 縱向位移)
+                    chart_data = pd.DataFrame({'橫向位移 (ft)': [pfx_x], '縱向位移 (ft)': [pfx_z], '球種': [result['pitch_type']]})
+                    scatter = alt.Chart(chart_data).mark_circle(size=200, color='#FF4B4B').encode(
+                        x=alt.X('橫向位移 (ft):Q', scale=alt.Scale(domain=[-3, 3])),
+                        y=alt.Y('縱向位移 (ft):Q', scale=alt.Scale(domain=[-3, 3])),
+                        tooltip=['球種', '橫向位移 (ft)', '縱向位移 (ft)']
+                    ).properties(height=250)
+                    
+                    # 畫十字線
+                    rule_x = alt.Chart(pd.DataFrame({'x': [0]})).mark_rule(color='gray', strokeDash=[5,5]).encode(x='x:Q')
+                    rule_y = alt.Chart(pd.DataFrame({'y': [0]})).mark_rule(color='gray', strokeDash=[5,5]).encode(y='y:Q')
+                    
+                    st.altair_chart(scatter + rule_x + rule_y, use_container_width=True)
 
-    # 顯示圖表
-    st.markdown(f"### 📈 {p_type} 歷史分布對照 (PR 分數)")
-    fig, ax = plt.subplots(figsize=(10, 4))
-    ref_data = df_baseline[df_baseline['pitch_type'] == p_type]
-    ax.hist(ref_data['pitch_quality_score'], bins=50, edgecolor='black', color='skyblue', alpha=0.7)
-    
-    # 畫出目前輸入球的位置
-    ax.axvline(score, color='red', linestyle='--', linewidth=2, label=f'Your Pitch ({score})')
-    ax.legend()
-    ax.set_title(f'Statcast {p_type} Quality Distribution')
-    ax.set_xlabel('Score')
-    ax.set_ylabel('Frequency')
-    st.pyplot(fig)
+                with col_advice:
+                    advice = result.get('coach_advice', {})
+                    final_conf = result.get('coach_confidence', 0.0)
+                    
+                    st.markdown("##### 👨‍🏫 AI 虛擬教練處方箋 (Prescription)")
+                    st.success(f"⚡ 透過以下微調，預期信心度可攀升至 **{final_conf:.1f}%**")
+                    
+                    c1, c2, c3 = st.columns(3)
+                    c1.metric("建議球速 (mph)", 
+                              f"{release_speed + advice.get('release_speed', 0):.1f}", 
+                              f"{advice.get('release_speed', 0):+.2f} mph", delta_color="inverse") # 球速降通常用 inverse 避免被當成變差
+                    c2.metric("建議轉速 (rpm)", 
+                              f"{release_spin_rate + advice.get('release_spin_rate', 0):.0f}", 
+                              f"{advice.get('release_spin_rate', 0):+.0f} rpm")
+                    c3.metric("建議轉軸 (°)", 
+                              f"{spin_axis + advice.get('spin_axis', 0):.1f}", 
+                              f"{advice.get('spin_axis', 0):+.1f} °")
+                    
+                    # --- 動態教練語錄生成器 ---
+                    st.markdown("###### 🗣️ 教練白話指引：")
+                    cues = []
+                    if abs(advice.get('release_speed', 0)) > 0.5:
+                        cues.append("手臂發力稍微放鬆，不需要刻意催球速。")
+                    if abs(advice.get('spin_axis', 0)) > 2.0:
+                        cues.append("放球瞬間食指微調扣縫線的角度，將轉軸稍微偏轉，這能大幅提升進壘率！")
+                    if advice.get('release_spin_rate', 0) > 50.0:
+                        cues.append("手指最後的延伸與下壓可以再多吃一點力量，增加旋轉力道。")
+                        
+                    if not cues:
+                        st.info("「這球的投球機制已經非常完美了！記住現在的肌肉感覺，繼續保持！」")
+                    else:
+                        st.info("「" + " ".join(cues) + "」")
+            else:
+                st.error(f"系統分析發生錯誤：{result.get('message')}")
+
+# ==========================================
+# Tab 2 & 3: 報告用的擴充區
+# ==========================================
+with tab_history:
+    st.markdown("### 📊 歷史大數據盲測驗證結果")
+    st.write("此處可放置 `test_real_data.py` 輸出的 30 顆球盲測 DataFrame 以及 Matplotlib 九宮格進壘圖，作為系統準確度的證據。")
+
+with tab_theory:
+    st.markdown("### 🔬 演算法核心數學模型")
+    st.latex(r"W_k = \left( \frac{\sigma_k}{\text{Tolerance}_k} \right)^2")
+    st.latex(r"\text{Total Loss} = \text{Loss}_{\text{precision}} + (\text{Loss}_{\text{penalty}} \times \lambda)")
+    st.write("展示**生理容忍度自平衡梯度下降模型 (Penalized Optimization)** 的推導過程與量綱消除魔法。")
