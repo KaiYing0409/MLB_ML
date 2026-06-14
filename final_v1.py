@@ -9,8 +9,6 @@ from scipy import stats
 # 載入品質分析模型 
 from finalproject_baseballmodel import evaluate_new_pitch, PITCH_CONFIG
 # ==========================================
-# predict.ensure_model_loaded()
-# print('MODEL_AVAILABLE =', predict.MODEL_AVAILABLE)
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_PATH = BASE_DIR / "Pitch_physical_only.csv"
@@ -18,7 +16,7 @@ print(f"正在讀取資料: {DATA_PATH} ...")
 
 df = pd.read_csv(DATA_PATH)
 
-# 2. 定義核心欄位並篩選 
+# 2. 定義系統輸入數據
 columns_to_keep = [
     'pitch_type',         
     'release_pos_x',      
@@ -40,26 +38,21 @@ columns_to_keep = [
 df_clean = df[columns_to_keep].copy()
 df_clean['pfx_x_abs'] = df_clean['pfx_x'].abs()
 
-#%%
-# 預覽前五筆資料
-print(df_clean.head())
-
-#phase 1 : 建立「成功落點」+「身體條件相似」的黃金基準池
+#phase 1 : 建立成功落點 + 身體條件相似的黃金基準池
 def build_success_similarity_pool(df, target_pitch_type, target_zone, target_pitcher, top_k=100):
     """
-    先鎖定「成功落點」，再找「身體條件最相似」的投手，建立基準池。
+    先鎖定成功落點，再找身體條件最相似的投手，建立基準池。
     
     參數:
     df: 清理過後的 Statcast DataFrame 
     target_pitch_type: 目標球種 (如 'SL')
     target_zone: 預期落點網格 (如 9)
-    target_pitcher: 目標投手的物理特徵字典
+    target_pitcher: 目標投手的物理特徵
     top_k: 要萃取多少顆黃金標準球
     """
-    
+    #定義球路分析的物理特徵
     physical_features = ['release_pos_x', 'release_pos_z', 'release_extension']
-    
-    print(f"stage 1 ：尋找所有落入 {target_zone} 號位的 {target_pitch_type}...")
+    print(f"尋找所有落入 {target_zone} 號位的 {target_pitch_type}...")
     
     # 1. 鎖定「該球種」且「成功落入目標區域」的球
     df_success = df[(df['pitch_type'] == target_pitch_type) & (df['zone'] == target_zone)].copy()
@@ -68,17 +61,17 @@ def build_success_similarity_pool(df, target_pitch_type, target_zone, target_pit
     df_success = df_success.dropna(subset=physical_features)
     
     if len(df_success) == 0:
-        raise ValueError(f"錯誤：資料庫中找不到落入 {target_zone} 號位的 {target_pitch_type} 數據！")
+        raise ValueError(f"資料庫中找不到落入 {target_zone} 號位的 {target_pitch_type} 數據！")
     
     if len(df_success) < top_k:
-        print(f"警告：符合條件的總球數 ({len(df_success)}) 少於設定的 top_k ({top_k})。將取用全部符合的數據。")
+        print(f"符合條件的總球數 ({len(df_success)}) 少於設定的 top_k ({top_k})。將取用全部符合的數據。")
         top_k = len(df_success)
     else:
         print(f"過濾完成：共有 {len(df_success)} 顆成功的球。")
 
-    print(f"stage 2 ：在這群成功案例中，尋找與目標投手最相似的 Top {top_k} 顆球...")
+    print(f"在這群成功案例中，尋找與目標投手最相似的 Top {top_k} 顆球...")
     
-    # 2. 提取矩陣準備算距離
+    # 2. 提取物理矩陣準備算歐式距離
     X_database = df_success[physical_features].values
     X_target = np.array([
         target_pitcher['release_pos_x'], 
@@ -94,7 +87,7 @@ def build_success_similarity_pool(df, target_pitch_type, target_zone, target_pit
     X_database_scaled = (X_database - mu_phys) / sigma_phys
     X_target_scaled = (X_target - mu_phys) / sigma_phys
     
-    # 歐式距離計算
+    # 歐式距離計算；假設投手身體特徵之間具獨立性
     distances = np.linalg.norm(X_database_scaled - X_target_scaled, axis=1)
     
     # 排序並找出距離最短的前 K 名的索引
@@ -115,7 +108,7 @@ def run_phase2_analysis(pool_df, optimization_features=None):
     if optimization_features is None:
         optimization_features = ['release_speed', 'release_spin_rate', 'spin_axis']
 
-    print("\nphase 2 ：進入優化分析階段...")
+    print("\nphase 2 ：進入優化分析階段")
     print(f"使用的優化特徵: {optimization_features}")
 
     pool_df_clean = pool_df.dropna(subset=optimization_features).copy()
@@ -124,7 +117,7 @@ def run_phase2_analysis(pool_df, optimization_features=None):
 
     if len(pool_df_clean) < len(pool_df):
         removed = len(pool_df) - len(pool_df_clean)
-        print(f"⚠️ Phase 2：剔除 {removed} 筆含 NaN 的優化特徵資料。")
+        print(f"Phase 2：剔除 {removed} 筆含 NaN 的優化特徵資料。")
 
     X_opt = pool_df_clean[optimization_features].values
     target_mean = np.mean(X_opt, axis=0)
@@ -155,7 +148,7 @@ def evaluate_pitch_confidence(current_pitch, target_mean, target_covariance, opt
     # 2. 計算與完美靶心的「物理誤差」 (delta = x - mu)
     delta_vector = x - target_mean
     
-    # 3. 計算共變異數矩陣的反矩陣 (用 pinv 避免數學報錯)
+    # 3. 計算共變異數矩陣的反矩陣
     cov_inv = np.linalg.pinv(target_covariance)
     
     # 4. 馬氏距離公式： D = sqrt( delta^T * cov_inv * delta )
@@ -311,7 +304,7 @@ def run_hybrid_ai_system(raw_pitch_data: dict, target_zone: int, pitcher_profile
     # ----------------------------------------------------
     # 馬氏靶心模型落點評分與物理診斷
     # ----------------------------------------------------
-    print(f"\n (目標落點：{target_zone} 號位)...")
+    print(f"\n (目標落點：{target_zone} 號位)")
     
     try:
         # 1. 把辨識出的球種 (detected_pitch_type) 傳入 Phase 1
@@ -336,7 +329,7 @@ def run_hybrid_ai_system(raw_pitch_data: dict, target_zone: int, pitcher_profile
 
         print(f"這顆 {detected_pitch_type} 落入 {target_zone} 號位的預測信心度為 【{score:.1f}%】")
 
-        # 4. 產生教練修正建議
+        # 4. 產生修正具體方向
         coach_advice, coach_confidence = gradient_descent_coach(
             current_pitch=raw_pitch_data,
             target_mean=target_mean,
@@ -345,7 +338,7 @@ def run_hybrid_ai_system(raw_pitch_data: dict, target_zone: int, pitcher_profile
             
         )
 
-        print("教練建議修正量：")
+        print("建議修正量：")
         for feat, adj in coach_advice.items():
             print(f" * {feat}: {adj:+.3f}")
         print(f"目標修正信心度: {coach_confidence:.1f}%")
@@ -363,66 +356,4 @@ def run_hybrid_ai_system(raw_pitch_data: dict, target_zone: int, pitcher_profile
     except ValueError as e:
         print(f"\n警告：{e}")
         return {"status": "error", "message": str(e)}
-
-
-# ==========================================
-# 測試區 
-# ==========================================
-if __name__ == '__main__':
-    my_pitcher = {
-        'release_pos_x':2.83,
-        'release_pos_z': 5.98,
-        'release_extension': 6.9
-    }
-    
-    try:
-        # 串接函式測試：
-        ''' (FF)
-        raw_pitch_input = {
-            'release_speed': 92.0,
-            'release_spin_rate': 1520.0,
-            'spin_axis': 238.0,
-            'api_break_x_arm': -4.2,
-            'api_break_z_with_gravity': 30.5,
-            'pfx_x': -2.3,
-            'pfx_z': 1.5,
-            'ax': -6.8,
-            'vx0': 8.4,
-            'vz0': -3.4,
-            'ay': 26.8,
-            'vy0': -135.5,
-            'arm_angle': 28.0,
-            'p_throws': 'R',
-            'release_pos_x': -2.12,
-            'release_pos_z': 5.54,
-            'release_extension': 6.5
-        '''
-        # (FF)
-        raw_pitch_input = {
-            'release_speed': 97.7,       
-            'release_spin_rate': 2577.0,
-            'spin_axis': 140,           
-            'pfx_x': 0.79,
-            'pfx_z': 1.06,
-            'api_break_x_arm': 0.79,
-            'api_break_z_with_gravity': 1.34,
-            'ax': 12.6094, 'vx0': -8.16783, 'vz0': -6.40157,
-            'ay': 33.636, 'vy0': -141.948, 'az': -16.4659,
-            'arm_angle': 33.9, 'p_throws': 'L',
-            'release_pos_x': 2.83, 'release_pos_z': 5.98, 'release_extension': 6.9
-        
-        
-        }
-    
-        result = run_hybrid_ai_system(
-            raw_pitch_data=raw_pitch_input,
-            target_zone=9,
-            pitcher_profile=my_pitcher,
-            df_database=df_clean
-        )
-    
-        print("\n===run_hybrid_ai_system 測試結果 ===")
-        print(result)
-    except Exception as e:
-        print("測試過濾器時發生錯誤：", e)
 
