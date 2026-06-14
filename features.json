@@ -1,0 +1,54 @@
+{
+  "L1": [
+    "spin_axis_sin",
+    "release_speed",
+    "api_break_z_with_gravity",
+    "pfx_x",
+    "spin_axis_cos",
+    "release_spin_rate",
+    "ay",
+    "vx0",
+    "vz0"
+  ],
+  "Fastball": [
+    "pfx_x",
+    "api_break_z_with_gravity",
+    "spin_axis_sin",
+    "release_speed",
+    "ay",
+    "release_spin_rate"
+  ],
+  "Breaking": [
+    "api_break_z_with_gravity",
+    "pfx_x",
+    "release_speed",
+    "spin_axis_cos",
+    "vz0",
+    "spin_axis_sin",
+    "vx0",
+    "release_spin_rate",
+    "ay"
+  ],
+  "Offspeed_R": [
+    "release_spin_rate",
+    "pfx_x",
+    "api_break_z_with_gravity",
+    "vx0",
+    "release_speed",
+    "ay",
+    "spin_axis_sin",
+    "spin_axis_cos",
+    "vz0"
+  ],
+  "Offspeed_L": [
+    "release_spin_rate",
+    "pfx_x",
+    "api_break_z_with_gravity",
+    "vx0",
+    "release_speed",
+    "ay",
+    "spin_axis_sin",
+    "spin_axis_cos",
+    "vz0"
+  ]
+}
