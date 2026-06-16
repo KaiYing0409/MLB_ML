@@ -1,5 +1,50 @@
 # MLB 投球球種分類器
 
+檔案執行流程:
+[原始資料]
+statcast_bat_tracking_2024_2025.csv
+        │
+        ▼
+┌───────────────────────────────────────┐
+│ 1. python preprocess.py                │
+│    （資料清理、IQR 離群移除、抽樣切分） │
+└───────────────────────────────────────┘
+        │
+        ├──→ Pitch_physical_only.csv   （IQR 清理後完整資料）
+        │       → 供 PR 評分（finalproject_baseballmodel.py）
+        │         與整合系統（final_v1.py）查找黃金基準池使用
+        │
+        └──→ testdata_only_phy.csv     （10 萬筆，各球種等比例抽樣）
+                │
+                ▼ 切分 60/20/20
+                ├──→ data_train.csv （60%）
+                ├──→ data_val.csv   （20%）
+                └──→ data_test.csv  （20%）
+                        │
+                        ▼
+        ┌───────────────────────────────────────┐
+        │ 2. python feature_selection.py         │
+        │    （用 train + val 做特徵選擇與訓練）  │
+        └───────────────────────────────────────┘
+                │
+                ├──→ features.json  （各層分類器選用的特徵清單）
+                └──→ model.pkl      （訓練好的所有 QDA 模型）
+                        │
+                        ▼ 完成後，以下程式皆可獨立執行
+        ┌─────────────┬─────────────┬─────────────┬─────────────┐
+        ▼             ▼             ▼             ▼             
+  python predict.py  python test.py  python final_v1.py  python test_real_data.py
+  （單顆球種辨識）   （分類器總準確   （整合系統，主程   （抽資料庫多顆球，
+                      率 + confusion   式內建測試案例，   批量跑完整 Pipeline，
+                      matrix 圖）      不另外輸出檔案）   輸出球種/信心度/
+                                                          PR/教練建議總表）
+
+
+
+
+
+
+
 ## 概述
 
 使用 MLB Statcast 投球物理量測數據對 8 種球種進行分類。採用**階層式 QDA（Quadratic Discriminant Analysis）架構**，所有模型以 NumPy 手刻實作，不使用 sklearn。
