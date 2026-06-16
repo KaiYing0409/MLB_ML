@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 """
-Created on Sat May  9 21:57:08 2026
 @author: Lin (NTHU ML Project)
 """
 import pandas as pd
@@ -85,7 +84,7 @@ if __name__ == '__main__':
     df_clean['pfx_x_abs'] = df_clean['pfx_x'].abs()
     print(f"篩選與清理完成，共剩下 {len(df_clean)} 筆有效資料。\n")
     
-    # 第二階段：特徵工程 - 動態計算球種 PR 值
+    # 第二階段：特徵工程 - 計算球種 PR 值
     print("2. 正在計算各球種 PR 值 (Stuff+ Score)...")
     
     def calculate_pitch_pr(df, config_matrix):
@@ -126,7 +125,7 @@ if __name__ == '__main__':
     
     print(pitch_stats)
     # 第三階段：視覺化與資料匯出
-    print("3. 繪製圖表並匯出資料給隊友...")
+    print("3. 繪製圖表並匯出資料...")
     avg_scores = df_scored.groupby('pitch_type')['pitch_quality_score'].mean()
     print("各球種平均 PR 值 (理想應接近 50):")
     print(avg_scores)
@@ -170,8 +169,8 @@ def evaluate_new_pitch(new_pitch, baseline_df, config_matrix):
             score += (final_pr / 100.0) * settings['weight']
 
     return round(score * 100, 2)
-
-#%%
+'''
+#%% 參考用，觀察不同球種的球質落在甚麼區間
 if __name__ == '__main__':
     # 1. 先選出你想看的球種 (例如 'FF')
     target_pitch = 'FF'
@@ -196,6 +195,7 @@ if __name__ == '__main__':
     print(f"轉速 (rpm): {worst_pitch['release_spin_rate']}")
     print(f"縱向位移 (英吋): {worst_pitch['pfx_z']}")
     print(f"橫向位移 (英吋): {worst_pitch['pfx_x']}")
+
 #%% 互動式輸入數據
 if __name__ == '__main__':
     while True:
@@ -229,3 +229,4 @@ if __name__ == '__main__':
             print(f"\n分析完成！你的 {p_type} 綜合 PR 評分為：【 {score} 分 】")
         except Exception as e:
             print(f"計算時發生錯誤: {e}")
+'''
