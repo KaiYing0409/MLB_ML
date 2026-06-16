@@ -361,8 +361,6 @@ print(result['margin'])           # Layer 1 後驗機率差（top1 - top2）
 
 ## ⚾ 球種素質評估模組（Stuff+ PR 評分系統）
 
-**負責人：** LinWeiLun
-
 ### 包含檔案
 
 | 檔案 | 說明 |
