@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-⚾ AI 棒球虛擬教練 - MLB-Grade Streamlit Dashboard
+棒球虛擬教練 - MLB-Grade Streamlit Dashboard
+
+執行方式:從終端機執行 streamlit run finalproject_baseballmodelapp.py
+-> 網頁輸入五項球速、轉速等等數值
 """
 import streamlit as st
 import pandas as pd
@@ -44,6 +47,7 @@ with tab_dashboard:
             pfx_z = st.number_input("縱向位移 VB (ft)", value=1.5, step=0.1)
             
             with st.expander("🛠️ 進階生物力學與動力參數 (Auto-filled)"):
+                # 因目前需要輸入多筆資料，目前除了主要的五項特徵，其他暫時設為預設值
                 release_pos_x = st.number_input("出手點 X", value=-2.12)
                 release_pos_z = st.number_input("出手點 Z", value=5.54)
                 release_extension = st.number_input("延伸距離", value=6.5)
