@@ -139,8 +139,8 @@ if __name__ == '__main__':
     plt.grid(False)
     plt.show()
     
-    df_scored.to_csv('ml_ready_pitch_data.csv', index=False)
-    print("檔案已儲存為 'ml_ready_pitch_data.csv'！\n")
+#    df_scored.to_csv('ml_ready_pitch_data.csv', index=False)
+#    print("檔案已儲存為 'ml_ready_pitch_data.csv'！\n")
 
 # 第四階段：單顆新球評估 (動態讀取矩陣)
 def evaluate_new_pitch(new_pitch, baseline_df, config_matrix):
