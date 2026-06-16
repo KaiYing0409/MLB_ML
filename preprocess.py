@@ -14,6 +14,7 @@ BIN_DEG   = 10
 MIN_RATIO = 0.01
 SEED      = 42
 
+#總資料中的投球物理特徵
 PHYSICAL_COLS = [
     'pitch_type', 'pitch_name',
     'release_speed', 'effective_speed',
@@ -30,12 +31,14 @@ PHYSICAL_COLS = [
     'p_throws', 'stand', 'pitcher',
 ]
 
+#過濾缺值的最低要求特徵清單
 MODEL_FEATS = [
     'release_speed', 'release_spin_rate', 'spin_axis',
     'pfx_x', 'api_break_z_with_gravity',
     'vx0', 'vz0', 'ay',
 ]
 
+# STEP 1：資料載入
 print("載入資料中...")
 df = pd.read_csv(DATA_PATH, usecols=lambda c: c in PHYSICAL_COLS)
 print(f"原始資料：{len(df):,} 筆，{df.shape[1]} 欄")
