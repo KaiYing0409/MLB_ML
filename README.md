@@ -1,6 +1,13 @@
 # MLB 投球球種分類器
 
-檔案執行流程:
+---
+# ⚾ 專案執行總覽（請先讀這份）
+
+本專案分為四個階段：**資料前處理 → 分類器訓練 → 單顆預測 / 整合分析 → 批量測試與驗證**。請依照以下順序執行，每個階段都依賴前一階段產出的檔案。
+
+## 完整執行順序
+
+```
 [原始資料]
 statcast_bat_tracking_2024_2025.csv
         │
@@ -38,13 +45,47 @@ statcast_bat_tracking_2024_2025.csv
                       率 + confusion   式內建測試案例，   批量跑完整 Pipeline，
                       matrix 圖）      不另外輸出檔案）   輸出球種/信心度/
                                                           PR/教練建議總表）
+```
 
+## 各階段說明
 
+**第一階段（必須最先執行一次）：** `preprocess.py` 讀取原始的 `statcast_bat_tracking_2024_2025.csv`，進行球種過濾、KC 合併、IQR 離群值移除（含 `spin_axis` 的循環感知 IQR）、sin/cos 轉換等前處理，產出五個檔案：`Pitch_physical_only.csv`（完整清理後資料，供後續 PR 評分與黃金基準池查找）、`testdata_only_phy.csv`（10 萬筆分層抽樣資料），以及由它切分出的 `data_train.csv`、`data_val.csv`、`data_test.csv`。
 
+**第二階段：** `feature_selection.py` 讀取 `data_train.csv` 與 `data_val.csv`，執行相關係數篩選、F-ratio 排序、Sequential Forward Selection，訓練出階層式 QDA 分類器，產出 `features.json`（各層使用的特徵清單）與 `model.pkl`（模型權重）。此階段完成後，後續所有程式才能正常執行。
 
+**第三階段：** 以下程式互相獨立，依需求執行即可。
 
+- `predict.py`：輸入單顆球的物理特徵，輸出球種辨識結果（終端機互動或被其他模組 import 使用）。
+- `test.py`：讀取 `data_test.csv` 與 `model.pkl`，輸出分類器在測試集上的整體準確率與各球種準確率，並產出 `confusion_matrix_overall.png`。
+- `final_v1.py`：本系統的核心整合模組，串接球種辨識、Stuff+ PR 評分、馬氏靶心控球信心度、梯度下降教練建議。直接執行只會在終端機印出單顆測試球的完整解析過程，**不會產出任何輸出檔案**，主要作為其他程式（如 `test_real_data.py`）import 使用的函式庫。
+- `test_real_data.py`：批量驗證腳本，從 `Pitch_physical_only.csv` 中抽樣多顆真實投球，逐一餵入 `final_v1.py` 的 `run_hybrid_ai_system()`，輸出整合後的完整結果，包含球種辨識正確率、Stuff+ PR 分數、控球信心度、教練修正建議，以及這批球的實際進壘點分佈圖。
 
+**獨立的視覺化介面：** `finalproject_baseballmodelapp.py` 是 Stuff+ PR 評分系統的 Streamlit Web App，**需另外在終端機以 `streamlit run finalproject_baseballmodelapp.py` 執行**，不屬於上述主 Pipeline 的一部分，可獨立操作體驗 PR 評分功能。
 
+## 環境需求
+
+```bash
+pip install pandas numpy scipy streamlit
+```
+
+## 檔案總覽
+
+| 檔案 | 階段 | 說明 |
+|------|------|------|
+| `preprocess.py` | 1 | 資料前處理，產出五個資料檔 |
+| `feature_selection.py` | 2 | 特徵選擇與分類器訓練 |
+| `features.json` | 2 產出 | 各層分類器特徵清單 |
+| `model.pkl` | 2 產出 | 訓練好的 QDA 模型 |
+| `predict.py` | 3 | 單顆球種辨識 |
+| `test.py` | 3 | 分類器準確率測試 |
+| `finalproject_baseballmodel.py` | 3 | Stuff+ PR 評分核心邏輯 |
+| `finalproject_baseballmodelapp.py` | 獨立 | PR 評分 Streamlit UI |
+| `final_v1.py` | 3 | 整合系統主程式（球種＋PR＋控球信心度＋教練建議） |
+| `test_real_data.py` | 3 | 整合系統批量驗證腳本 |
+| `data_train.csv` / `data_val.csv` / `data_test.csv` | 1 產出 | 分類器訓練用切分資料 |
+| `Pitch_physical_only.csv` | 1 產出 | PR 評分與黃金基準池查找用完整資料 |
+
+---
 ## 概述
 
 使用 MLB Statcast 投球物理量測數據對 8 種球種進行分類。採用**階層式 QDA（Quadratic Discriminant Analysis）架構**，所有模型以 NumPy 手刻實作，不使用 sklearn。
