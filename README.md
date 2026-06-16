@@ -85,6 +85,8 @@ pip install pandas numpy scipy streamlit
 | `data_train.csv` / `data_val.csv` / `data_test.csv` | 1 產出 | 分類器訓練用切分資料 |
 | `Pitch_physical_only.csv` | 1 產出 | PR 評分與黃金基準池查找用完整資料 |
 
+
+以下開始分類器、PR評分之敘述、最後是test_real_data.py執行的大致結果
 ---
 ## 概述
 
@@ -403,12 +405,6 @@ python finalproject_baseballmodel.py
 streamlit run finalproject_baseballmodelapp.py
 ```
 
-### 額外套件需求
-
-```bash
-pip install streamlit scipy
-```
-
 # ⚾ MLB 混合式 AI 投球分析與優化系統 (Hybrid Pitch Analytics System)
 
 ## 📖 專案簡介 (Introduction)
@@ -432,7 +428,7 @@ pip install streamlit scipy
 
 ## 🧩 核心模組功能與底層邏輯解析
 
-### 🟢 模組 A：AI 球種辨識引擎 (Pitch Classification)
+### 🟢 模組 A：球種辨識引擎 (Pitch Classification)
 * **功能目的：** 在不依賴人為標籤的情況下，精準判斷投手剛投出的球種。
 * **計算邏輯 ：**
   本模組基於統計學手刻的 **QDA (二次判別分析)** 與 **階層式 Binary LDA (線性判別分析)**。
@@ -460,23 +456,12 @@ pip install streamlit scipy
 
 ## 🚀 系統執行範例 (Execution Example)
 
-當我們呼叫主程式 `run_hybrid_ai_system()` 並傳入一顆未知投球的 12 項測速槍數據時，終端機輸出結果如下：
+當我們執行'test_real_data.py' ，終端機輸出結果大致如下：
 
 ```text
-==================================================
-⚾ [系統啟動] 接收到全新測速槍數據，開始解析...
-==================================================
-🤖 AI 辨識判定：這是一顆 【SL】 (信心 margin: 0.8523)
+🏆 **整體球種辨識準確率：__% 
 
-🔥 [分支 1] 評估球路軌跡品質 (Stuff+ Score)...
-✅ 球威評分完成：綜合 PR 評分達 【 92.5 分 】
+系統盲測的前 20 筆完整診斷結果。
+| ID | 真實球種 | 預測球種 | 辨識 | PR | 目前信心 | 建議修正方向 | 修正後信心｜
 
-🧠 [分支 2] 啟動控球優化引擎 (目標落點：9 號位)...
-✅ 控球評分完成：落入目標區域的信心度為 【 15.2% 】
 
-==================================================
-📊 系統終極輸出報告：
-球種: SL (滑球)
-球威 (Stuff+): 92.5 (極佳的物理軌跡)
-控球 (Command+): 15.2% (嚴重失投)
----
