@@ -155,16 +155,16 @@ def evaluate_pitch_confidence(current_pitch, target_mean, target_covariance, opt
     distance_squared = np.dot(np.dot(delta_vector, cov_inv), delta_vector)
     mahalanobis_dist = np.sqrt(max(0, distance_squared)) # max(0) 是保護機制，避免浮點數微小負值
     ''' 
-    # 5. 轉換為 0~100 的信心度 (使用常態分佈衰減曲線)
+    # 5. 轉換為 0~100 的信心度 (使用常態分佈衰減曲線)(version 1)
     # -0.5 是一個常數，如果你覺得系統給分太嚴格，可以改成 -0.2；覺得太鬆可以改成 -1.0
     confidence_score = np.exp(-0.5 * (mahalanobis_dist ** 2)) * 100
     ''' 
-    # 5. 轉換為 0~100 的信心度 (切換回卡方分布版本)(分數會較不嚴厲，因常態分布衰減很快)
+    # 5. 轉換為 0~100 的信心度 (切換回卡方分布版本)(version 2)
+    # 意義:計算機率密度函數->這些數據有多少比當前數據還歪
     from scipy.stats import chi2
     # distance_squared 就是馬氏距離的平方 (D^2)
     # df 是自由度，因為你們用了三個特徵 ['release_speed', 'release_spin_rate', 'spin_axis']，所以 df=3
     confidence_score = (1 - chi2.cdf(distance_squared, df=len(optimization_features))) * 100
-    
     
     # 6. 把誤差打包成字典，準備交給 Phase 4 
     deltas_dict = {feat: diff for feat, diff in zip(optimization_features, delta_vector)}
@@ -264,6 +264,8 @@ def gradient_descent_coach(current_pitch, target_mean, target_cov, features):
 
     return advice_dict, final_conf
 
+
+# 主要統整之程式碼
 def run_hybrid_ai_system(raw_pitch_data: dict, target_zone: int, pitcher_profile: dict, df_database):
     """
     棒球分析系統 Pipeline
@@ -274,7 +276,7 @@ def run_hybrid_ai_system(raw_pitch_data: dict, target_zone: int, pitcher_profile
     print("=" * 50)
     
     # ----------------------------------------------------
-    # 模型球種辨識
+    # 模型球種辨識(雙層分類器)
     # ----------------------------------------------------
     print("正在進行球種預測...")
     ml_result = predict_pitch(raw_pitch_data) 
@@ -285,7 +287,7 @@ def run_hybrid_ai_system(raw_pitch_data: dict, target_zone: int, pitcher_profile
     print(f"這是一顆 【{detected_pitch_type}】 (信心 margin: {ml_result['margin']:.4f})")
     
     # ----------------------------------------------------
-    # 球威評分 (Stuff+ Score)   
+    # 球威評分 (Stuff+ Score) 
     # ----------------------------------------------------
     print("\n 評估球路軌跡品質 (Stuff+ Score)...")
     raw_pitch_data['pitch_type'] = detected_pitch_type
@@ -302,7 +304,7 @@ def run_hybrid_ai_system(raw_pitch_data: dict, target_zone: int, pitcher_profile
         stuff_score = None
 
     # ----------------------------------------------------
-    # 馬氏靶心模型落點評分與物理診斷
+    # 馬氏靶心模型落點評分與物理診斷(梯度下降法)
     # ----------------------------------------------------
     print(f"\n (目標落點：{target_zone} 號位)")
     
