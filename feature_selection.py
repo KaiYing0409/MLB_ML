@@ -8,9 +8,10 @@ VAL_PATH    = 'data_val.csv'
 OUTPUT_JSON = 'features.json'
 OUTPUT_PKL  = 'model.pkl'
 
-CORR_THRESH  = 0.9
-ELBOW_THRESH = 0.003   # 驗證集準確率提升 < 0.3% 視為不顯著
+CORR_THRESH  = 0.9     # 相關係數閾值
+ELBOW_THRESH = 0.003   # forward selection 停止條件：Val Acc 提升 < 0.3%
 
+# 球種到大類的對應
 GROUP_MAP = {
     'FF': 'Fastball', 'SI': 'Fastball', 'FC': 'Fastball',
     'SL': 'Breaking', 'ST': 'Breaking', 'CU': 'Breaking',
@@ -18,12 +19,14 @@ GROUP_MAP = {
 }
 GROUPS = ['Fastball', 'Breaking', 'Offspeed']
 
+# 各大類包含的球種
 PITCH_IN_GROUP = {
     'Fastball': ['FF', 'SI', 'FC'],
     'Breaking': ['SL', 'ST', 'CU'],
     'Offspeed': ['CH', 'FS'],
 }
 
+# 所有候選特徵
 ALL_FEATS = [
     'release_speed', 'effective_speed',
     'release_spin_rate',
@@ -34,7 +37,7 @@ ALL_FEATS = [
     'ax', 'ay', 'az',
 ]
 
-# QDA（forward selection 驗證用）
+# QDA 分類器
 class QDAClassifier:
     def fit(self, X, y):
         self.classes_  = np.unique(y)
@@ -48,9 +51,9 @@ class QDAClassifier:
             self.priors_[c] = len(Xc) / N
             self.means_[c]  = Xc.mean(axis=0)
             cov = np.cov(Xc.T, ddof=1)
-            if cov.ndim == 0:
+            if cov.ndim == 0:          # 單特徵時 np.cov 回傳純量，補回矩陣形式
                 cov = np.array([[cov]])
-            cov += np.eye(cov.shape[0]) * 1e-6
+            cov += np.eye(cov.shape[0]) * 1e-6   # 正規化，防止奇異矩陣
             self.inv_covs_[c] = np.linalg.inv(cov)
             _, logdet = np.linalg.slogdet(cov)
             self.log_dets_[c] = logdet
@@ -59,7 +62,7 @@ class QDAClassifier:
         scores = np.zeros((len(X), len(self.classes_)))
         for ci, c in enumerate(self.classes_):
             diff = X - self.means_[c]
-            quad = np.sum(diff @ self.inv_covs_[c] * diff, axis=1)
+            quad = np.sum(diff @ self.inv_covs_[c] * diff, axis=1)  # 馬氏距離平方項
             scores[:, ci] = (
                 -0.5 * quad
                 - 0.5 * self.log_dets_[c]
@@ -67,12 +70,16 @@ class QDAClassifier:
             )
         return self.classes_[np.argmax(scores, axis=1)]
 
-# 工具函式
+# 工具函式 
 def zscore(x):
+    """標準化"""
     s = x.std()
     return (x - x.mean()) / (s if s > 1e-9 else 1e-9)
 
 def compute_f_ratio(x_scaled, y, groups):
+    """
+    計算單一特徵對指定類別的 F-ratio（組間變異 / 組內變異）。
+    """
     N = len(x_scaled)
     K = len(groups)
     grand_mean = x_scaled.mean()
@@ -82,13 +89,16 @@ def compute_f_ratio(x_scaled, y, groups):
         if len(Xg) == 0:
             continue
         cm    = Xg.mean()
-        SS_b += len(Xg) * (cm - grand_mean) ** 2
-        SS_w += ((Xg - cm) ** 2).sum()
+        SS_b += len(Xg) * (cm - grand_mean) ** 2   # 組間平方和
+        SS_w += ((Xg - cm) ** 2).sum()              # 組內平方和
     MS_b = SS_b / (K - 1)
     MS_w = SS_w / (N - K) + 1e-9
     return MS_b / MS_w
 
 def corr_filter(df_data, feat_list, fr_dict, thresh):
+    """
+    相關係數計算
+    """
     X    = df_data[feat_list].values.astype(float)
     mu   = X.mean(axis=0)
     sig  = X.std(axis=0) + 1e-9
@@ -115,6 +125,9 @@ def corr_filter(df_data, feat_list, fr_dict, thresh):
     return kept, log
 
 def val_acc_macro(df_tr, df_va, feats, label_col, classes):
+    """
+    驗證集的 macro accuracy（各類別準確率的算術平均）。
+    """
     df_tr = df_tr.dropna(subset=feats)
     df_va = df_va.dropna(subset=feats)
     X_tr  = df_tr[feats].values.astype(float)
@@ -135,6 +148,9 @@ def val_acc_macro(df_tr, df_va, feats, label_col, classes):
     return np.mean(per_cls)
 
 def forward_select(df_tr, df_va, feat_order, label_col, classes, elbow_thresh, hand_label=''):
+    """
+    依 F-ratio 預排序的特徵，逐一加入並觀察 Val Acc 變化。
+    """
     print(f"\n  ── {hand_label}  Train={len(df_tr):,}，Val={len(df_va):,} ──")
     print(f"  {'N':<5} {'加入特徵':<30} {'Val Acc':>10}")
     print(f"  {'-'*48}")
@@ -146,6 +162,7 @@ def forward_select(df_tr, df_va, feat_order, label_col, classes, elbow_thresh, h
         current_feats = feat_order[:n_feat]
         added         = feat_order[n_feat - 1]
 
+        # 若任一類別訓練樣本過少則提前停止
         min_samples = min((df_tr[label_col] == c).sum() for c in classes)
         if min_samples < 5:
             print(f"  {n_feat:<5} {added:<30} {'樣本不足':>10}")
@@ -158,7 +175,7 @@ def forward_select(df_tr, df_va, feat_order, label_col, classes, elbow_thresh, h
         if n_feat > 1:
             prev_acc = acc_history[-2][2]
             if acc - prev_acc >= elbow_thresh:
-                elbow_n = n_feat
+                elbow_n = n_feat  
 
     return elbow_n, acc_history
 
@@ -167,16 +184,19 @@ print("載入資料...")
 df_train = pd.read_csv(TRAIN_PATH)
 df_val   = pd.read_csv(VAL_PATH)
 
+# 加入大類標籤欄位
 df_train['group'] = df_train['pitch_type'].map(GROUP_MAP)
 df_val['group']   = df_val['pitch_type'].map(GROUP_MAP)
 
 df_train = df_train.dropna(subset=['group']).reset_index(drop=True)
 df_val   = df_val.dropna(subset=['group']).reset_index(drop=True)
 
+# 只保留 ALL_FEATS 中實際存在的欄位，並刪除任何特徵有缺值的列
 avail = [f for f in ALL_FEATS if f in df_train.columns]
 df_train = df_train.dropna(subset=avail).reset_index(drop=True)
 df_val   = df_val.dropna(subset=avail).reset_index(drop=True)
 
+# 左右投分開處理
 df_tr_R = df_train[df_train['p_throws'] == 'R'].reset_index(drop=True)
 df_tr_L = df_train[df_train['p_throws'] == 'L'].reset_index(drop=True)
 df_va_R = df_val[df_val['p_throws'] == 'R'].reset_index(drop=True)
@@ -185,7 +205,7 @@ df_va_L = df_val[df_val['p_throws'] == 'L'].reset_index(drop=True)
 print(f"Train — 右投：{len(df_tr_R):,} 筆，左投：{len(df_tr_L):,} 筆")
 print(f"Val   — 右投：{len(df_va_R):,} 筆，左投：{len(df_va_L):,} 筆")
 
-# STEP 1：相關係數篩選（F-ratio 以 train 資料計算）
+# STEP 1：相關係數篩選
 print(f"\n{'='*65}")
 print(f"  STEP 1：相關係數篩選（|r| > {CORR_THRESH}，左右投分開，取聯集）")
 print(f"{'='*65}")
@@ -212,7 +232,7 @@ filtered_feats = [f for f in avail if f not in removed_all]
 print(f"\n  移除（{len(removed_all)} 個）：{sorted(removed_all)}")
 print(f"  保留（{len(filtered_feats)} 個）：{filtered_feats}")
 
-# STEP 2：全體 F-ratio 排序（三大類，左右投分開，train only）
+# STEP 2：Layer 1 F-ratio 排序
 print(f"\n{'='*65}")
 print(f"  STEP 2：全體 F-ratio（三大類，train 資料）")
 print(f"{'='*65}")
@@ -227,7 +247,7 @@ print('  ' + '-' * 56)
 for i, f in enumerate(l1_feat_order):
     print(f"  {i+1:<5} {f:<26} {l1_fr_R[f]:>11.1f} {l1_fr_L[f]:>11.1f}")
 
-# STEP 3：各大類 F-ratio 排序（train only）
+# STEP 3：Layer 2 各大類 F-ratio 排序
 print(f"\n{'='*65}")
 print(f"  STEP 3：各大類內部 F-ratio（train 資料）")
 print(f"{'='*65}")
@@ -270,7 +290,7 @@ for hand in ['R', 'L']:
     )
 
     if hand == 'R':
-        l1_elbow_n = elbow_n
+        l1_elbow_n = elbow_n  
 
     final_n     = l1_elbow_n
     final_feats = l1_feat_order[:final_n]
@@ -282,7 +302,7 @@ for hand in ['R', 'L']:
 
 L1_FEATS = l1_feat_order[:l1_elbow_n]
 
-# STEP 5：各大類 Forward Selection
+# STEP 5：Layer 2 各大類 Forward Selection
 print(f"\n{'='*65}")
 print(f"  STEP 5：各大類 Forward Selection")
 print(f"{'='*65}")
@@ -309,7 +329,7 @@ for grp, pitches in PITCH_IN_GROUP.items():
         )
 
         if hand == 'R':
-            grp_elbow_n = elbow_n
+            grp_elbow_n = elbow_n  
 
         final_n     = grp_elbow_n
         final_feats = feat_order[:final_n]
@@ -322,7 +342,7 @@ for grp, pitches in PITCH_IN_GROUP.items():
         key = f'{grp}_{hand}' if grp == 'Offspeed' else grp
         sub_feats_result[key] = final_feats
 
-# 摘要 & 輸出 features.json
+# 輸出 features.json
 print(f"\n{'='*65}")
 print("  選用特徵摘要")
 print(f"{'='*65}")
@@ -347,8 +367,9 @@ with open(OUTPUT_JSON, 'w', encoding='utf-8') as f:
 print(f"\n已儲存：{OUTPUT_JSON}")
 
 
-# 訓練最終模型並存 model.pkl
+# 訓練最終模型並儲存 model.pkl
 def fit_qda_final(df_tr, feats, label_col):
+    """用完整訓練集（而非 forward selection 過程中的子集）訓練最終 QDA，回傳模型與標準化參數。"""
     df_tr = df_tr.dropna(subset=feats)
     X   = df_tr[feats].values.astype(float)
     y   = df_tr[label_col].values
@@ -362,6 +383,7 @@ print(f"\n{'='*65}")
 print("  訓練最終模型")
 print(f"{'='*65}")
 
+# Layer 1：分左右投各訓練一個三大類 QDA
 l1_models = {}
 for hand in ['R', 'L']:
     df_h = df_train[df_train['p_throws'] == hand]
@@ -369,6 +391,7 @@ for hand in ['R', 'L']:
     l1_models[hand] = (qda, mu, sig)
     print(f"  L1 {hand}：{len(df_h):,} 筆，{len(L1_FEATS)} 個特徵")
 
+# Layer 2： 6 個 sub-classifier
 l2_models = {}
 SUB_FEATS = {
     'Fastball':   features['Fastball'],
@@ -383,9 +406,10 @@ for grp, pitches in PITCH_IN_GROUP.items():
         mask  = (df_train['group'] == grp) & (df_train['p_throws'] == hand)
         df_h  = df_train[mask]
         qda, mu, sig = fit_qda_final(df_h, feats, 'pitch_type')
-        l2_models[f'{grp}_{hand}'] = (qda, mu, sig, feats)
+        l2_models[f'{grp}_{hand}'] = (qda, mu, sig, feats) 
         print(f"  L2 {grp}-{hand}：{len(df_h):,} 筆，{len(feats)} 個特徵")
 
+# 其餘欄位為相容性佔位（供test.py 的 _ModelUnpickler讀取）
 model = {
     'l1_models':     l1_models,
     'l1_feats':      L1_FEATS,
