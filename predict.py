@@ -103,7 +103,7 @@ def predict_pitch(raw: dict) -> dict:
     feats = compute_features(raw)
     hand  = raw['p_throws']
 
-    # --- Layer 1：三大類 QDA ---
+    # Layer 1：三大類 QDA
     qda_l1, mu_l1, sig_l1 = l1_models[hand]
     x_l1 = np.array([feats[f] for f in l1_feats], dtype=float).reshape(1, -1)
     x_l1_z = (x_l1 - mu_l1) / sig_l1
@@ -113,7 +113,7 @@ def predict_pitch(raw: dict) -> dict:
     grp_pred = qda_l1.classes_[top2_idx[0]]
     margin   = float(probs_l1[top2_idx[0]] - probs_l1[top2_idx[1]])
 
-    # --- Layer 2：子分類器 ---
+    # Layer 2：子分類器
     model_key = f'{grp_pred}_{hand}'
 
     qda_l2, mu_l2, sig_l2, l2_feats = l2_models[model_key]
